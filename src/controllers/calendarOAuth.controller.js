@@ -35,17 +35,24 @@ async function handleOAuthCallback(req, res, next) {
   // Definir URL do front-end uma única vez (porta 8080 como padrão)
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
   
+  console.log('🔔 [OAUTH CALLBACK] Recebido:', {
+    method: req.method,
+    url: req.url,
+    query: req.query,
+    frontendUrl
+  });
+  
   try {
     const { code, state, error: oauthError } = req.query;
 
     // Se o usuário negou permissões
     if (oauthError) {
-      return res.redirect(`${frontendUrl}/calendar/connected?success=false&error=${encodeURIComponent('Permissões negadas pelo usuário')}`);
+      return res.redirect(`${frontendUrl}/agenda?error=${encodeURIComponent('Permissões negadas pelo usuário')}`);
     }
 
     // Validar parâmetros obrigatórios
     if (!code || !state) {
-      return res.redirect(`${frontendUrl}/calendar/connected?success=false&error=${encodeURIComponent('Parâmetros inválidos')}`);
+      return res.redirect(`${frontendUrl}/agenda?error=${encodeURIComponent('Parâmetros inválidos')}`);
     }
 
     // Validar state e obter userId
@@ -53,13 +60,13 @@ async function handleOAuthCallback(req, res, next) {
     try {
       userId = validateState(state);
     } catch (error) {
-      return res.redirect(`${frontendUrl}/calendar/connected?success=false&error=${encodeURIComponent('State inválido ou expirado')}`);
+      return res.redirect(`${frontendUrl}/agenda?error=${encodeURIComponent('State inválido ou expirado')}`);
     }
 
     // Verificar se usuário existe
     const user = await User.findById(userId);
     if (!user) {
-      return res.redirect(`${frontendUrl}/calendar/connected?success=false&error=${encodeURIComponent('Usuário não encontrado')}`);
+      return res.redirect(`${frontendUrl}/agenda?error=${encodeURIComponent('Usuário não encontrado')}`);
     }
 
     // Trocar code por tokens
@@ -68,7 +75,7 @@ async function handleOAuthCallback(req, res, next) {
       tokens = await exchangeCodeForTokens(code);
     } catch (error) {
       console.error('Erro ao trocar code por tokens:', error);
-      return res.redirect(`${frontendUrl}/calendar/connected?success=false&error=${encodeURIComponent(error.message)}`);
+      return res.redirect(`${frontendUrl}/agenda?error=${encodeURIComponent(error.message)}`);
     }
 
     // Obter informações do usuário do Google (opcional)
@@ -108,11 +115,11 @@ async function handleOAuthCallback(req, res, next) {
 
     console.log('✅ [OAUTH] Google Calendar conectado para usuário:', userId);
 
-    // Redirecionar para front-end com sucesso
-    res.redirect(`${frontendUrl}/calendar/connected?success=true`);
+    // Redirecionar para página de agenda
+    res.redirect(`${frontendUrl}/agenda`);
   } catch (error) {
     console.error('Erro no callback OAuth:', error);
-    res.redirect(`${frontendUrl}/calendar/connected?success=false&error=${encodeURIComponent('Erro ao processar autorização')}`);
+    res.redirect(`${frontendUrl}/agenda?error=${encodeURIComponent('Erro ao processar autorização')}`);
   }
 }
 

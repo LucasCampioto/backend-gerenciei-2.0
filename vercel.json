@@ -1,5 +1,12 @@
 {
     "rewrites": [
-      { "source": "/(.*)", "destination": "/api/index.js" }
+      { 
+        "source": "/api/calendar/oauth/callback", 
+        "destination": "/api/calendar/oauth/callback.js" 
+      },
+      { 
+        "source": "/(.*)", 
+        "destination": "/api/index.js" 
+      }
     ]
 }
