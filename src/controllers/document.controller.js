@@ -1,6 +1,6 @@
 const Document = require('../models/Document');
 const mongoose = require('mongoose');
-const { s3Client, BUCKET_NAME } = require('../config/s3');
+const { s3Client, BUCKET_NAME, isS3Available } = require('../config/s3');
 const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
 
 function formatDocument(doc) {
@@ -197,39 +197,43 @@ async function deleteDocument(req, res, next) {
     }
     
     // Tentar deletar arquivo do S3 se estiver lá
-    try {
-      // Verificar se signatureUrl é uma URL do S3
-      if (document.signatureUrl && document.signatureUrl.includes('amazonaws.com')) {
-        const s3Key = extractS3KeyFromUrl(document.signatureUrl);
-        
-        if (s3Key) {
-          const deleteCommand = new DeleteObjectCommand({
-            Bucket: BUCKET_NAME,
-            Key: s3Key
-          });
+    if (isS3Available() && s3Client) {
+      try {
+        // Verificar se signatureUrl é uma URL do S3
+        if (document.signatureUrl && document.signatureUrl.includes('amazonaws.com')) {
+          const s3Key = extractS3KeyFromUrl(document.signatureUrl);
           
-          await s3Client.send(deleteCommand);
-          console.log(`Arquivo deletado do S3: ${s3Key}`);
+          if (s3Key) {
+            const deleteCommand = new DeleteObjectCommand({
+              Bucket: BUCKET_NAME,
+              Key: s3Key
+            });
+            
+            await s3Client.send(deleteCommand);
+            console.log(`Arquivo deletado do S3: ${s3Key}`);
+          }
         }
-      }
-      
-      // Também deletar fileUrl se for diferente do signatureUrl
-      if (document.fileUrl && document.fileUrl.includes('amazonaws.com') && document.fileUrl !== document.signatureUrl) {
-        const fileS3Key = extractS3KeyFromUrl(document.fileUrl);
         
-        if (fileS3Key) {
-          const deleteCommand = new DeleteObjectCommand({
-            Bucket: BUCKET_NAME,
-            Key: fileS3Key
-          });
+        // Também deletar fileUrl se for diferente do signatureUrl
+        if (document.fileUrl && document.fileUrl.includes('amazonaws.com') && document.fileUrl !== document.signatureUrl) {
+          const fileS3Key = extractS3KeyFromUrl(document.fileUrl);
           
-          await s3Client.send(deleteCommand);
-          console.log(`Arquivo deletado do S3: ${fileS3Key}`);
+          if (fileS3Key) {
+            const deleteCommand = new DeleteObjectCommand({
+              Bucket: BUCKET_NAME,
+              Key: fileS3Key
+            });
+            
+            await s3Client.send(deleteCommand);
+            console.log(`Arquivo deletado do S3: ${fileS3Key}`);
+          }
         }
+      } catch (s3Error) {
+        // Log do erro mas continua para deletar do banco mesmo assim
+        console.error('Erro ao deletar arquivo do S3 (continuando com delete do banco):', s3Error.message);
       }
-    } catch (s3Error) {
-      // Log do erro mas continua para deletar do banco mesmo assim
-      console.error('Erro ao deletar arquivo do S3 (continuando com delete do banco):', s3Error);
+    } else {
+      console.warn('⚠️ S3 não disponível. Arquivo não deletado do S3.');
     }
     
     // Deletar documento do banco de dados
