@@ -9,7 +9,11 @@ dotenv.config();
 const app = express();
 
 // Middlewares
-app.use(cors());
+// Configuração de CORS mais permissiva para desenvolvimento
+app.use(cors({
+  origin: true, // Permite todas as origens
+  credentials: true
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
