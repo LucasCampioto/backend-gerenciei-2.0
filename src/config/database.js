@@ -1,42 +1,25 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
+
+const MONGODB_URI = process.env.MONGODB_URI;
+if (!MONGODB_URI) throw new Error("MONGODB_URI não definida na Vercel (Production)");
+
+let cached = global.__mongoose;
+if (!cached) cached = global.__mongoose = { conn: null, promise: null };
 
 async function connectDatabase() {
-  try {
-    const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/signly';
-    
-    // Opções de conexão para MongoDB Atlas
-    const options = {
-      serverSelectionTimeoutMS: 30000, // Timeout de 30 segundos para seleção de servidor
-      socketTimeoutMS: 45000, // Timeout de 45 segundos para operações de socket
-      connectTimeoutMS: 30000, // Timeout de 30 segundos para conexão inicial
-      maxPoolSize: 10, // Número máximo de conexões no pool
-      retryWrites: true, // Habilitar retry de writes
-      w: 'majority' // Write concern
-    };
+  if (cached.conn) return cached.conn;
 
-    await mongoose.connect(MONGODB_URI, options);
-    
-    console.log('✅ Connected to MongoDB');
-    
-    // Tratamento de eventos de conexão
-    mongoose.connection.on('error', (err) => {
-      console.error('❌ MongoDB connection error:', err);
+  if (!cached.promise) {
+    cached.promise = mongoose.connect(MONGODB_URI, {
+      maxPoolSize: 5,
+      serverSelectionTimeoutMS: 30000,
+      bufferCommands: false,
     });
-
-    mongoose.connection.on('disconnected', () => {
-      console.warn('⚠️ MongoDB disconnected');
-    });
-
-    mongoose.connection.on('reconnected', () => {
-      console.log('✅ MongoDB reconnected');
-    });
-  } catch (error) {
-    console.error('❌ MongoDB connection error:', error);
-    throw error;
   }
+
+  cached.conn = await cached.promise;
+  console.log("✅ Connected to MongoDB");
+  return cached.conn;
 }
 
-module.exports = {
-  connectDatabase
-};
-
+module.exports = { connectDatabase };
