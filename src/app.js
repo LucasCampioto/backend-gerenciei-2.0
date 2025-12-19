@@ -18,16 +18,20 @@ app.use(cors({
 
 // Middleware para parsear query params manualmente (necessário na Vercel)
 app.use((req, res, next) => {
-  // Se req.query estiver vazio mas houver query params na URL, parsear manualmente
-  if ((!req.query || Object.keys(req.query).length === 0) && req.url && req.url.includes('?')) {
+  // Se houver query params na URL, sempre parsear manualmente (Vercel não faz isso corretamente)
+  if (req.url && req.url.includes('?')) {
     try {
       const fullUrl = `https://${req.headers.host || 'localhost'}${req.url}`;
       const urlObj = new URL(fullUrl);
-      req.query = {};
+      const parsedQuery = {};
       urlObj.searchParams.forEach((value, key) => {
-        req.query[key] = value;
+        parsedQuery[key] = value;
       });
-      console.log('📋 [EXPRESS] Query params parseados manualmente:', req.query);
+      // Só sobrescrever se realmente parseou algo ou se req.query estava vazio
+      if (Object.keys(parsedQuery).length > 0 || !req.query || Object.keys(req.query).length === 0) {
+        req.query = parsedQuery;
+        console.log('📋 [EXPRESS] Query params parseados manualmente:', req.query);
+      }
     } catch (error) {
       console.warn('⚠️ [EXPRESS] Erro ao parsear query params:', error.message);
     }
