@@ -1,6 +1,7 @@
 const app = require("../src/app");
 const { connectDatabase } = require("../src/config/database");
 const mongoose = require("mongoose");
+const { URL } = require("url");
 
 module.exports = async (req, res) => {
   try {
@@ -21,11 +22,28 @@ module.exports = async (req, res) => {
       // Importar e chamar o handler diretamente
       const { handleOAuthCallback } = require('../src/controllers/calendarOAuth.controller');
       
+      // Parsear query params manualmente da URL (Vercel não faz isso automaticamente)
+      let parsedQuery = {};
+      try {
+        // Construir URL completa para parsear query params
+        const fullUrl = `https://${req.headers.host || 'localhost'}${req.url}`;
+        const urlObj = new URL(fullUrl);
+        // Converter URLSearchParams para objeto simples
+        urlObj.searchParams.forEach((value, key) => {
+          parsedQuery[key] = value;
+        });
+        console.log("📋 Query params parseados:", parsedQuery);
+      } catch (parseError) {
+        console.warn("⚠️ Erro ao parsear query params, usando req.query:", parseError.message);
+        parsedQuery = req.query || {};
+      }
+      
       // Criar objetos req/res compatíveis com Express
       const expressReq = {
         ...req,
-        query: req.query || {},
-        method: req.method
+        query: parsedQuery, // Usar query params parseados manualmente
+        method: req.method,
+        url: req.url
       };
       
       const expressRes = {
