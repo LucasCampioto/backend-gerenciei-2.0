@@ -7,12 +7,55 @@ module.exports = async (req, res) => {
     // Log temporário para diagnóstico (remover depois)
     console.log("📥 Request received:", req.method, req.url);
     console.log("📥 Original URL:", req.url);
+    console.log("📥 Path:", req.path);
     console.log("📥 Query:", req.query);
+    console.log("📥 Headers:", JSON.stringify(req.headers));
     
-    // Na Vercel, o rewrite pode alterar o caminho
-    // Garantir que a URL seja tratada corretamente pelo Express
-    // Se a URL não começar com /api, pode ser que o rewrite tenha removido
-    const originalUrl = req.url;
+    // Verificar se é a rota de callback OAuth e processar diretamente se necessário
+    if (req.url.includes('/api/calendar/oauth/callback') || req.url.includes('/calendar/oauth/callback')) {
+      console.log("🎯 Detectado callback OAuth, processando diretamente...");
+      
+      // Garantir conexão antes das rotas (essencial em Lambdas)
+      await connectDatabase();
+      
+      // Importar e chamar o handler diretamente
+      const { handleOAuthCallback } = require('../src/controllers/calendarOAuth.controller');
+      
+      // Criar objetos req/res compatíveis com Express
+      const expressReq = {
+        ...req,
+        query: req.query || {},
+        method: req.method
+      };
+      
+      const expressRes = {
+        ...res,
+        redirect: (url) => {
+          console.log("🔄 Redirecionando para:", url);
+          res.writeHead(302, { Location: url });
+          res.end();
+        },
+        status: (code) => ({
+          json: (data) => {
+            res.statusCode = code;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify(data));
+          }
+        }),
+        json: (data) => {
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify(data));
+        }
+      };
+      
+      return handleOAuthCallback(expressReq, expressRes, (err) => {
+        if (err) {
+          console.error("❌ Erro no callback:", err);
+          res.statusCode = 500;
+          res.end(JSON.stringify({ success: false, error: err.message }));
+        }
+      });
+    }
     
     console.log("MONGODB_URI exists?", !!process.env.MONGODB_URI);
     console.log("JWT_SECRET exists?", !!process.env.JWT_SECRET);

@@ -14,6 +14,19 @@ app.use(cors({
   origin: true, // Permite todas as origens
   credentials: true
 }));
+
+// Middleware para debug (temporário)
+app.use((req, res, next) => {
+  console.log('🔍 [EXPRESS] Request:', {
+    method: req.method,
+    url: req.url,
+    path: req.path,
+    originalUrl: req.originalUrl,
+    baseUrl: req.baseUrl
+  });
+  next();
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
