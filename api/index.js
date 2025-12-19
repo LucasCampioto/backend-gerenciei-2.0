@@ -12,8 +12,22 @@ module.exports = async (req, res) => {
     console.log("📥 Query:", req.query);
     console.log("📥 Headers:", JSON.stringify(req.headers));
     
+    // Normalizar URL para comparação (remover query params temporariamente)
+    const urlPath = req.url ? req.url.split('?')[0] : '';
+    const isOAuthCallback = 
+      urlPath === '/api/calendar/oauth/callback' ||
+      urlPath === '/calendar/oauth/callback' ||
+      req.url?.includes('/api/calendar/oauth/callback') ||
+      req.url?.includes('/calendar/oauth/callback');
+    
+    console.log("🔍 Verificando OAuth callback:", {
+      urlPath,
+      originalUrl: req.url,
+      isOAuthCallback
+    });
+    
     // Verificar se é a rota de callback OAuth e processar diretamente se necessário
-    if (req.url.includes('/api/calendar/oauth/callback') || req.url.includes('/calendar/oauth/callback')) {
+    if (isOAuthCallback) {
       console.log("🎯 Detectado callback OAuth, processando diretamente...");
       
       // Garantir conexão antes das rotas (essencial em Lambdas)
