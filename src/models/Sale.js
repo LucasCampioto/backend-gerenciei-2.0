@@ -51,7 +51,7 @@ const saleSchema = new mongoose.Schema({
   },
   paymentMethod: {
     type: String,
-    enum: ['crédito', 'débito', 'link de pagamento', 'dinheiro'],
+    enum: ['crédito', 'débito', 'link de pagamento', 'dinheiro', 'pix'],
     required: true
   },
   discount: {
