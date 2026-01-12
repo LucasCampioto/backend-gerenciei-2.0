@@ -20,8 +20,18 @@ async function getAllExpenses(req, res, next) {
     
     if (startDate || endDate) {
       query.createdAt = {};
-      if (startDate) query.createdAt.$gte = new Date(startDate);
-      if (endDate) query.createdAt.$lte = new Date(endDate);
+      if (startDate) {
+        query.createdAt.$gte = new Date(startDate);
+      }
+      if (endDate) {
+        const parsedEndDate = new Date(endDate);
+        // Se endDate não tem horário (apenas data), ajustar para final do dia em UTC
+        // Verificar se a string original não tinha horário (formato YYYY-MM-DD)
+        if (typeof endDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(endDate.trim())) {
+          parsedEndDate.setUTCHours(23, 59, 59, 999);
+        }
+        query.createdAt.$lte = parsedEndDate;
+      }
     }
     
     if (category) {

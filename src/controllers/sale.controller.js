@@ -16,6 +16,8 @@ function formatSale(sale) {
     totalValue: obj.totalValue,
     commissionValue: obj.commissionValue,
     netValue: obj.netValue,
+    paymentMethod: obj.paymentMethod,
+    discount: obj.discount || 0,
     employeeId: obj.employeeId ? obj.employeeId.toString() : obj.employeeId,
     employeeName: obj.employeeName,
     createdAt: obj.createdAt
@@ -30,8 +32,23 @@ async function getAllSales(req, res, next) {
     
     if (startDate || endDate) {
       query.createdAt = {};
-      if (startDate) query.createdAt.$gte = new Date(startDate);
-      if (endDate) query.createdAt.$lte = new Date(endDate);
+      let parsedStartDate = null;
+      let parsedEndDate = null;
+      
+      if (startDate) {
+        parsedStartDate = new Date(startDate);
+        query.createdAt.$gte = parsedStartDate;
+      }
+      if (endDate) {
+        parsedEndDate = new Date(endDate);
+        // Se endDate não tem horário (apenas data), ajustar para final do dia em UTC
+        // Verificar se a string original não tinha horário (formato YYYY-MM-DD)
+        if (typeof endDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(endDate.trim())) {
+          parsedEndDate.setUTCHours(23, 59, 59, 999);
+        }
+        query.createdAt.$lte = parsedEndDate;
+      }
+      
     }
     
     if (employeeId && mongoose.Types.ObjectId.isValid(employeeId)) {
@@ -52,6 +69,7 @@ async function getAllSales(req, res, next) {
       .skip(skip)
       .limit(limitNum);
     
+    
     // Calcular informações de paginação
     const totalPages = Math.ceil(total / limitNum);
     const hasNextPage = pageNum < totalPages;
@@ -65,8 +83,23 @@ async function getAllSales(req, res, next) {
     
     if (startDate || endDate) {
       allSalesQuery.createdAt = {};
-      if (startDate) allSalesQuery.createdAt.$gte = new Date(startDate);
-      if (endDate) allSalesQuery.createdAt.$lte = new Date(endDate);
+      let parsedStartDateAll = null;
+      let parsedEndDateAll = null;
+      
+      if (startDate) {
+        parsedStartDateAll = new Date(startDate);
+        allSalesQuery.createdAt.$gte = parsedStartDateAll;
+      }
+      if (endDate) {
+        parsedEndDateAll = new Date(endDate);
+        // Se endDate não tem horário (apenas data), ajustar para final do dia em UTC
+        // Verificar se a string original não tinha horário (formato YYYY-MM-DD)
+        if (typeof endDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(endDate.trim())) {
+          parsedEndDateAll.setUTCHours(23, 59, 59, 999);
+        }
+        allSalesQuery.createdAt.$lte = parsedEndDateAll;
+      }
+      
     }
     
     // Se houver filtro específico de employeeId, aplicar
@@ -145,9 +178,13 @@ async function getAllSales(req, res, next) {
     // Ordenar por total de vendas (maior para menor)
     summaryByEmployee.sort((a, b) => b.totalSalesValue - a.totalSalesValue);
     
+    // Calcular total líquido de TODAS as vendas (não apenas as paginadas)
+    const totalNetValue = allSales.reduce((sum, s) => sum + (s.netValue || 0), 0);
+    
     res.json({
       success: true,
       data: sales.map(formatSale),
+      totalNetValue: Math.round(totalNetValue * 100) / 100, // Total líquido de todas as vendas (não apenas paginadas)
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -166,7 +203,7 @@ async function getAllSales(req, res, next) {
 
 async function createSale(req, res, next) {
   try {
-    const { items, totalValue, commissionValue, netValue, employeeId, employeeName } = req.body;
+    const { items, totalValue, commissionValue, netValue, paymentMethod, discount, employeeId, employeeName } = req.body;
     
     // Calcular netValue se não fornecido
     const calculatedNetValue = netValue !== undefined 
@@ -179,6 +216,8 @@ async function createSale(req, res, next) {
       totalValue,
       commissionValue: commissionValue || 0,
       netValue: calculatedNetValue,
+      paymentMethod,
+      discount: discount || 0,
       employeeId: employeeId || undefined,
       employeeName: employeeName || undefined
     });

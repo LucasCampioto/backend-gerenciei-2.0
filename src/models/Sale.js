@@ -49,6 +49,16 @@ const saleSchema = new mongoose.Schema({
     required: true,
     min: 0
   },
+  paymentMethod: {
+    type: String,
+    enum: ['crédito', 'débito', 'link de pagamento', 'dinheiro'],
+    required: true
+  },
+  discount: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
   employeeId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Employee'
