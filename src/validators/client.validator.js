@@ -10,7 +10,9 @@ const clientSchema = Joi.object({
     'any.required': 'Telefone é obrigatório'
   }),
   category: Joi.string().valid('lead', 'cliente').default('lead'),
-  isNewClient: Joi.boolean().default(true)
+  isNewClient: Joi.boolean().default(true),
+  clientGroup: Joi.string().valid('grupo_a', 'grupo_b', 'grupo_c', 'grupo_d').default('grupo_a'),
+  noReturnReason: Joi.string().allow('').optional()
 });
 
 module.exports = {

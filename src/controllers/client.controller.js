@@ -1,5 +1,6 @@
 const Client = require('../models/Client');
 const mongoose = require('mongoose');
+const { logActivity } = require('../services/clientActivity.service');
 
 function formatClient(client) {
   const obj = client.toObject ? client.toObject() : client;
@@ -14,6 +15,8 @@ function formatClient(client) {
     convertedAt: obj.convertedAt
       ? (obj.convertedAt instanceof Date ? obj.convertedAt.toISOString() : obj.convertedAt)
       : null,
+    clientGroup: obj.clientGroup ?? 'grupo_a',
+    noReturnReason: obj.noReturnReason ?? '',
     createdAt: createdAt instanceof Date
       ? createdAt.toISOString()
       : createdAt ?? new Date().toISOString()
@@ -42,7 +45,7 @@ async function getAllClients(req, res, next) {
 
 async function createClient(req, res, next) {
   try {
-    const { name, phone, category, isNewClient } = req.body;
+    const { name, phone, category, isNewClient, clientGroup, noReturnReason } = req.body;
 
     const client = new Client({
       userId: req.userId,
@@ -50,10 +53,21 @@ async function createClient(req, res, next) {
       phone,
       category: category || 'lead',
       isNewClient: isNewClient !== undefined ? isNewClient : true,
+      clientGroup: clientGroup || 'grupo_a',
+      noReturnReason: noReturnReason || '',
       convertedAt: category === 'cliente' ? new Date() : null,
     });
 
     await client.save();
+
+    await logActivity({
+      userId: req.userId,
+      clientId: client._id,
+      clientName: client.name,
+      type: 'initial_group',
+      toGroup: client.clientGroup,
+      content: 'Cadastro inicial',
+    });
 
     res.status(201).json({
       success: true,
@@ -68,7 +82,7 @@ async function createClient(req, res, next) {
 async function updateClient(req, res, next) {
   try {
     const { id } = req.params;
-    const { name, phone, category, isNewClient } = req.body;
+    const { name, phone, category, isNewClient, clientGroup, noReturnReason } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -86,7 +100,29 @@ async function updateClient(req, res, next) {
       });
     }
 
-    const updateData = { name, phone, category, isNewClient };
+    const updateData = { name, phone, category, isNewClient, clientGroup, noReturnReason };
+
+    if (clientGroup !== undefined && clientGroup !== existing.clientGroup) {
+      await logActivity({
+        userId: req.userId,
+        clientId: existing._id,
+        clientName: existing.name,
+        type: 'group_change',
+        fromGroup: existing.clientGroup,
+        toGroup: clientGroup,
+        content: '',
+      });
+    }
+
+    if (noReturnReason !== undefined && noReturnReason !== existing.noReturnReason) {
+      await logActivity({
+        userId: req.userId,
+        clientId: existing._id,
+        clientName: existing.name,
+        type: 'reason_update',
+        content: noReturnReason,
+      });
+    }
 
     if (category === 'cliente' && existing.category !== 'cliente') {
       updateData.convertedAt = new Date();

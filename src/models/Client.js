@@ -29,6 +29,21 @@ const clientSchema = new mongoose.Schema({
   convertedAt: {
     type: Date,
     default: null
+  },
+  clientGroup: {
+    type: String,
+    enum: ['grupo_a', 'grupo_b', 'grupo_c', 'grupo_d'],
+    default: 'grupo_a'
+  },
+  noReturnReason: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  improvementReason: {
+    type: String,
+    trim: true,
+    default: ''
   }
 }, {
   timestamps: true
