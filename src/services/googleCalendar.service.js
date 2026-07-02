@@ -56,10 +56,12 @@ async function getCalendarClientForUser(userId) {
 
 // Formatar evento do Google Calendar para padrão da API
 function formatEvent(event) {
+  const isAllDay = Boolean(event.start?.date && !event.start?.dateTime);
   const formatted = {
     id: event.id,
-    summary: event.summary || '', // Nome da pessoa/evento
+    summary: event.summary || '',
     description: event.description || '',
+    isAllDay,
     start: event.start?.dateTime || event.start?.date || null,
     end: event.end?.dateTime || event.end?.date || null,
     location: event.location || '',
@@ -252,10 +254,36 @@ async function getPrimaryCalendarId(userId) {
   }
 }
 
+const PREFERRED_CALENDAR_NAME = process.env.GOOGLE_PREFERRED_CALENDAR_NAME || 'Family';
+
+async function findCalendarByName(userId, calendarName) {
+  const calendars = await getCalendarsList(userId);
+  const normalized = calendarName.trim().toLowerCase();
+  return calendars.find((cal) => cal.summary.trim().toLowerCase() === normalized) ?? null;
+}
+
+async function resolvePreferredCalendar(userId) {
+  const preferred = await findCalendarByName(userId, PREFERRED_CALENDAR_NAME);
+  if (preferred) {
+    return { id: preferred.id, summary: preferred.summary };
+  }
+
+  const primaryId = await getPrimaryCalendarId(userId);
+  const calendars = await getCalendarsList(userId);
+  const primary = calendars.find((cal) => cal.id === primaryId);
+  return {
+    id: primaryId,
+    summary: primary?.summary || 'Principal',
+  };
+}
+
 module.exports = {
   getCalendarClientForUser,
   getEvents,
   formatEvent,
   getPrimaryCalendarId,
-  getCalendarsList
+  getCalendarsList,
+  findCalendarByName,
+  resolvePreferredCalendar,
+  PREFERRED_CALENDAR_NAME,
 };

@@ -21,8 +21,19 @@ const saleSchema = Joi.object({
     'any.required': 'Método de pagamento é obrigatório'
   }),
   discount: Joi.number().min(0).default(0).optional(),
+  paymentFeePercentage: Joi.number().min(0).max(100).optional(),
+  paymentFeeValue: Joi.number().min(0).optional(),
+  cardBrandGroup: Joi.string().valid('visa_master', 'elo_amex', 'default').optional(),
+  installments: Joi.number().integer().min(1).max(12).optional(),
   employeeId: Joi.string().allow(null, '').optional(),
-  employeeName: Joi.string().allow(null, '').optional()
+  employeeName: Joi.string().allow(null, '').optional(),
+  clientId: Joi.string().required().messages({
+    'any.required': 'Cliente é obrigatório'
+  }),
+  clientName: Joi.string().required().messages({
+    'any.required': 'Nome do cliente é obrigatório'
+  }),
+  clientPhone: Joi.string().allow(null, '').optional()
 });
 
 module.exports = {

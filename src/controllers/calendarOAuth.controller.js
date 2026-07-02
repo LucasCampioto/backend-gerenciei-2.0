@@ -1,6 +1,6 @@
 const User = require('../models/User');
 const { getAuthUrl, validateState, exchangeCodeForTokens, getUserInfo } = require('../services/googleOAuth.service');
-const { getPrimaryCalendarId } = require('../services/googleCalendar.service');
+const { resolvePreferredCalendar, getCalendarsList } = require('../services/googleCalendar.service');
 
 // Iniciar fluxo OAuth - retorna URL para front-end redirecionar
 async function initiateOAuth(req, res, next) {
@@ -102,14 +102,16 @@ async function handleOAuthCallback(req, res, next) {
 
     // Buscar e salvar calendário principal (após salvar tokens)
     try {
-      console.log('🔍 [OAUTH] Buscando calendário principal do usuário...');
-      const primaryCalendarId = await getPrimaryCalendarId(userId);
-      user.googleCalendarId = primaryCalendarId;
-      console.log('✅ [OAUTH] Calendário principal identificado:', primaryCalendarId);
+      console.log('🔍 [OAUTH] Buscando calendário preferido do usuário...');
+      const preferred = await resolvePreferredCalendar(userId);
+      user.googleCalendarId = preferred.id;
+      user.googleCalendarName = preferred.summary;
+      console.log('✅ [OAUTH] Calendário preferido:', preferred.summary, preferred.id);
       await user.save();
     } catch (error) {
-      console.warn('⚠️ [OAUTH] Erro ao buscar calendário principal, usando "primary" como padrão:', error.message);
+      console.warn('⚠️ [OAUTH] Erro ao buscar calendário preferido, usando "primary":', error.message);
       user.googleCalendarId = 'primary';
+      user.googleCalendarName = 'Principal';
       await user.save();
     }
 
@@ -143,6 +145,7 @@ async function disconnectCalendar(req, res, next) {
     user.googleCalendarConnected = false;
     user.googleCalendarEmail = null;
     user.googleCalendarId = null;
+    user.googleCalendarName = null;
 
     await user.save();
 
@@ -175,6 +178,7 @@ async function getConnectionStatus(req, res, next) {
         connected: user.googleCalendarConnected || false,
         email: user.googleCalendarEmail || null,
         calendarId: user.googleCalendarId || null,
+        calendarName: user.googleCalendarName || null,
         connectedAt: user.updatedAt // Última atualização (quando conectou)
       }
     });
@@ -184,10 +188,89 @@ async function getConnectionStatus(req, res, next) {
   }
 }
 
+async function setPreferredCalendar(req, res, next) {
+  try {
+    const userId = req.userId;
+    const { calendarId, calendarName } = req.body;
+
+    if (!calendarId || typeof calendarId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'calendarId é obrigatório',
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user?.googleCalendarConnected) {
+      return res.status(400).json({
+        success: false,
+        error: 'Conecte o Google Calendar antes de escolher um calendário.',
+      });
+    }
+
+    const calendars = await getCalendarsList(userId);
+    const selected = calendars.find((cal) => cal.id === calendarId);
+    if (!selected) {
+      return res.status(400).json({
+        success: false,
+        error: 'Calendário não encontrado na sua conta Google.',
+      });
+    }
+
+    user.googleCalendarId = selected.id;
+    user.googleCalendarName = calendarName || selected.summary;
+    await user.save();
+
+    res.json({
+      success: true,
+      data: {
+        calendarId: user.googleCalendarId,
+        calendarName: user.googleCalendarName,
+      },
+      message: 'Calendário preferido atualizado',
+    });
+  } catch (error) {
+    console.error('Erro ao salvar calendário preferido:', error);
+    next(error);
+  }
+}
+
+async function syncFamilyCalendar(req, res, next) {
+  try {
+    const userId = req.userId;
+    const user = await User.findById(userId);
+
+    if (!user?.googleCalendarConnected) {
+      return res.status(400).json({
+        success: false,
+        error: 'Google Calendar não conectado.',
+      });
+    }
+
+    const preferred = await resolvePreferredCalendar(userId);
+    user.googleCalendarId = preferred.id;
+    user.googleCalendarName = preferred.summary;
+    await user.save();
+
+    res.json({
+      success: true,
+      data: {
+        calendarId: user.googleCalendarId,
+        calendarName: user.googleCalendarName,
+      },
+    });
+  } catch (error) {
+    console.error('Erro ao sincronizar calendário Family:', error);
+    next(error);
+  }
+}
+
 module.exports = {
   initiateOAuth,
   handleOAuthCallback,
   disconnectCalendar,
-  getConnectionStatus
+  getConnectionStatus,
+  setPreferredCalendar,
+  syncFamilyCalendar,
 };
 

@@ -54,6 +54,28 @@ const saleSchema = new mongoose.Schema({
     enum: ['crédito', 'débito', 'link de pagamento', 'dinheiro', 'pix'],
     required: true
   },
+  paymentFeePercentage: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 100,
+  },
+  paymentFeeValue: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  cardBrandGroup: {
+    type: String,
+    enum: ['visa_master', 'elo_amex', 'default'],
+    default: 'default',
+  },
+  installments: {
+    type: Number,
+    min: 1,
+    max: 12,
+    default: 1,
+  },
   discount: {
     type: Number,
     default: 0,
@@ -64,6 +86,16 @@ const saleSchema = new mongoose.Schema({
     ref: 'Employee'
   },
   employeeName: {
+    type: String
+  },
+  clientId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Client'
+  },
+  clientName: {
+    type: String
+  },
+  clientPhone: {
     type: String
   }
 }, {

@@ -71,21 +71,25 @@ app.get('/health', (req, res) => {
 const authRoutes = require('./routes/auth.routes');
 const procedureRoutes = require('./routes/procedure.routes');
 const employeeRoutes = require('./routes/employee.routes');
+const clientRoutes = require('./routes/client.routes');
 const saleRoutes = require('./routes/sale.routes');
 const expenseRoutes = require('./routes/expense.routes');
 const documentRoutes = require('./routes/document.routes');
 const calendarRoutes = require('./routes/calendar.routes');
 const reportsRoutes = require('./routes/reports.routes');
+const paymentFeeRoutes = require('./routes/paymentFee.routes');
 
 // Usar rotas com prefixo /api
 app.use('/api/auth', authRoutes);
 app.use('/api/procedures', procedureRoutes);
 app.use('/api/employees', employeeRoutes);
+app.use('/api/clients', clientRoutes);
 app.use('/api/sales', saleRoutes);
 app.use('/api/expenses', expenseRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/reports', reportsRoutes);
+app.use('/api/payment-fees', paymentFeeRoutes);
 
 // Rota 404 para API
 app.use('/api', (req, res) => {

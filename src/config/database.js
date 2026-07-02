@@ -1,6 +1,12 @@
+const dns = require("dns");
 const mongoose = require("mongoose");
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/signly';
+
+// Windows: o DNS padrão (ex.: fe80::1 do roteador) pode recusar consultas SRV do mongodb+srv://
+if (process.platform === "win32" && MONGODB_URI.startsWith("mongodb+srv://")) {
+  dns.setServers(["8.8.8.8", "1.1.1.1"]);
+}
 
 // Cache para reutilizar conexão entre invocações (warm Lambda)
 let cached = global.__mongoose;
@@ -52,6 +58,14 @@ async function connectDatabase() {
   try {
     cached.conn = await cached.promise;
     console.log("✅ Connected to MongoDB");
+
+    try {
+      const { migratePaymentFeeIndexes } = require("../migrations/paymentFee.migration");
+      await migratePaymentFeeIndexes();
+    } catch (migrationError) {
+      console.warn("PaymentFee migration:", migrationError.message);
+    }
+
     return cached.conn;
   } catch (error) {
     // Limpar cache em caso de erro

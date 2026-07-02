@@ -44,6 +44,10 @@ const userSchema = new mongoose.Schema({
   googleCalendarId: {
     type: String,
     default: null
+  },
+  googleCalendarName: {
+    type: String,
+    default: null
   }
 }, {
   timestamps: true

@@ -1,8 +1,20 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
+// Validar JWT_SECRET
+if (!process.env.JWT_SECRET) {
+  console.error('❌ JWT_SECRET não está definido nas variáveis de ambiente!');
+}
+
 async function signup(req, res, next) {
   try {
+    if (!process.env.JWT_SECRET) {
+      return res.status(500).json({
+        success: false,
+        error: 'Configuração do servidor incompleta'
+      });
+    }
+
     const { name, email, password } = req.body;
     
     // Verificar se o email já existe
@@ -44,6 +56,13 @@ async function signup(req, res, next) {
 
 async function login(req, res, next) {
   try {
+    if (!process.env.JWT_SECRET) {
+      return res.status(500).json({
+        success: false,
+        error: 'Configuração do servidor incompleta'
+      });
+    }
+
     const { email, password } = req.body;
     
     // Buscar usuário

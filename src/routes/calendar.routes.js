@@ -5,7 +5,9 @@ const {
   initiateOAuth, 
   handleOAuthCallback, 
   disconnectCalendar, 
-  getConnectionStatus 
+  getConnectionStatus,
+  setPreferredCalendar,
+  syncFamilyCalendar,
 } = require('../controllers/calendarOAuth.controller');
 const { authenticate } = require('../middleware/auth.middleware');
 
@@ -18,6 +20,8 @@ router.use(authenticate);
 // Rotas OAuth
 router.get('/oauth/initiate', initiateOAuth);
 router.get('/oauth/status', getConnectionStatus);
+router.put('/oauth/calendar', setPreferredCalendar);
+router.post('/oauth/sync-family', syncFamilyCalendar);
 router.post('/oauth/disconnect', disconnectCalendar);
 
 // Rota para listar calendários disponíveis

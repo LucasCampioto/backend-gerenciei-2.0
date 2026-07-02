@@ -1,6 +1,7 @@
 const Sale = require('../models/Sale');
 const Employee = require('../models/Employee');
 const mongoose = require('mongoose');
+const { getFeePercentageForUser, round2 } = require('./paymentFee.controller');
 
 function formatSale(sale) {
   const obj = sale.toObject();
@@ -17,16 +18,23 @@ function formatSale(sale) {
     commissionValue: obj.commissionValue,
     netValue: obj.netValue,
     paymentMethod: obj.paymentMethod,
+    paymentFeePercentage: obj.paymentFeePercentage ?? 0,
+    paymentFeeValue: obj.paymentFeeValue ?? 0,
+    cardBrandGroup: obj.cardBrandGroup ?? 'default',
+    installments: obj.installments ?? 1,
     discount: obj.discount || 0,
     employeeId: obj.employeeId ? obj.employeeId.toString() : obj.employeeId,
     employeeName: obj.employeeName,
+    clientId: obj.clientId ? obj.clientId.toString() : obj.clientId,
+    clientName: obj.clientName,
+    clientPhone: obj.clientPhone,
     createdAt: obj.createdAt
   };
 }
 
 async function getAllSales(req, res, next) {
   try {
-    const { startDate, endDate, employeeId, page = 1, limit = 10 } = req.query;
+    const { startDate, endDate, employeeId, clientId, page = 1, limit = 10 } = req.query;
     
     const query = { userId: req.userId };
     
@@ -53,6 +61,10 @@ async function getAllSales(req, res, next) {
     
     if (employeeId && mongoose.Types.ObjectId.isValid(employeeId)) {
       query.employeeId = employeeId;
+    }
+
+    if (clientId && mongoose.Types.ObjectId.isValid(clientId)) {
+      query.clientId = clientId;
     }
     
     // Converter page e limit para números
@@ -203,23 +215,53 @@ async function getAllSales(req, res, next) {
 
 async function createSale(req, res, next) {
   try {
-    const { items, totalValue, commissionValue, netValue, paymentMethod, discount, employeeId, employeeName } = req.body;
-    
-    // Calcular netValue se não fornecido
-    const calculatedNetValue = netValue !== undefined 
-      ? netValue 
-      : totalValue - (commissionValue || 0);
-    
+    const {
+      items,
+      totalValue,
+      commissionValue,
+      paymentMethod,
+      discount,
+      employeeId,
+      employeeName,
+      clientId,
+      clientName,
+      clientPhone,
+      cardBrandGroup,
+      installments,
+    } = req.body;
+
+    const installmentCount = paymentMethod === 'crédito' ? (installments || 1) : 1;
+    const feePercentage = await getFeePercentageForUser(
+      req.userId,
+      paymentMethod,
+      cardBrandGroup,
+      installmentCount
+    );
+    const paymentFeeValue = round2((totalValue * feePercentage) / 100);
+    const commission = commissionValue || 0;
+    const calculatedNetValue = round2(Math.max(0, totalValue - commission - paymentFeeValue));
+    const resolvedBrandGroup =
+      paymentMethod === 'débito' || paymentMethod === 'crédito'
+        ? cardBrandGroup || 'visa_master'
+        : 'default';
+
     const sale = new Sale({
       userId: req.userId,
       items,
       totalValue,
-      commissionValue: commissionValue || 0,
+      commissionValue: commission,
       netValue: calculatedNetValue,
       paymentMethod,
+      paymentFeePercentage: round2(feePercentage),
+      paymentFeeValue,
+      cardBrandGroup: resolvedBrandGroup,
+      installments: installmentCount,
       discount: discount || 0,
       employeeId: employeeId || undefined,
-      employeeName: employeeName || undefined
+      employeeName: employeeName || undefined,
+      clientId: clientId || undefined,
+      clientName: clientName || undefined,
+      clientPhone: clientPhone || undefined,
     });
     
     await sale.save();
