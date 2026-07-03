@@ -17,6 +17,8 @@ function formatClient(client) {
       : null,
     clientGroup: obj.clientGroup ?? 'grupo_a',
     noReturnReason: obj.noReturnReason ?? '',
+    leadSource: obj.leadSource ?? null,
+    leadSourceOther: obj.leadSourceOther ?? '',
     createdAt: createdAt instanceof Date
       ? createdAt.toISOString()
       : createdAt ?? new Date().toISOString()
@@ -45,7 +47,7 @@ async function getAllClients(req, res, next) {
 
 async function createClient(req, res, next) {
   try {
-    const { name, phone, category, isNewClient, clientGroup, noReturnReason } = req.body;
+    const { name, phone, category, isNewClient, clientGroup, noReturnReason, leadSource, leadSourceOther } = req.body;
 
     const client = new Client({
       userId: req.userId,
@@ -55,6 +57,8 @@ async function createClient(req, res, next) {
       isNewClient: isNewClient !== undefined ? isNewClient : true,
       clientGroup: clientGroup || 'grupo_a',
       noReturnReason: noReturnReason || '',
+      leadSource: leadSource || null,
+      leadSourceOther: leadSource === 'outros' ? (leadSourceOther || '').trim() : '',
       convertedAt: category === 'cliente' ? new Date() : null,
     });
 
@@ -82,7 +86,7 @@ async function createClient(req, res, next) {
 async function updateClient(req, res, next) {
   try {
     const { id } = req.params;
-    const { name, phone, category, isNewClient, clientGroup, noReturnReason } = req.body;
+    const { name, phone, category, isNewClient, clientGroup, noReturnReason, leadSource, leadSourceOther } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -100,7 +104,16 @@ async function updateClient(req, res, next) {
       });
     }
 
-    const updateData = { name, phone, category, isNewClient, clientGroup, noReturnReason };
+    const updateData = {
+      name,
+      phone,
+      category,
+      isNewClient,
+      clientGroup,
+      noReturnReason,
+      leadSource: leadSource || null,
+      leadSourceOther: leadSource === 'outros' ? (leadSourceOther || '').trim() : '',
+    };
 
     if (clientGroup !== undefined && clientGroup !== existing.clientGroup) {
       await logActivity({

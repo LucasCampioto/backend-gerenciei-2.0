@@ -12,7 +12,19 @@ const clientSchema = Joi.object({
   category: Joi.string().valid('lead', 'cliente').default('lead'),
   isNewClient: Joi.boolean().default(true),
   clientGroup: Joi.string().valid('grupo_a', 'grupo_b', 'grupo_c', 'grupo_d').default('grupo_a'),
-  noReturnReason: Joi.string().allow('').optional()
+  noReturnReason: Joi.string().allow('').optional(),
+  leadSource: Joi.string()
+    .valid('redes_sociais', 'google', 'indicacao', 'outros')
+    .allow(null, '')
+    .optional(),
+  leadSourceOther: Joi.string().allow('').optional(),
+}).custom((value, helpers) => {
+  if (value.leadSource === 'outros' && !value.leadSourceOther?.trim()) {
+    return helpers.error('any.custom', {
+      message: 'Informe o meio de origem quando selecionar Outros',
+    });
+  }
+  return value;
 });
 
 module.exports = {

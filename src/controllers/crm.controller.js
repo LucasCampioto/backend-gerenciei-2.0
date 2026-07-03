@@ -34,6 +34,8 @@ function formatCrmClient(client, lastSaleMap) {
     clientGroup: client.clientGroup ?? 'grupo_a',
     noReturnReason: client.noReturnReason ?? '',
     improvementReason: client.improvementReason ?? '',
+    leadSource: client.leadSource ?? null,
+    leadSourceOther: client.leadSourceOther ?? '',
     lastAppointment: lastSale?.lastAppointment ?? null,
     totalSales: lastSale?.totalSales ?? 0,
     createdAt: client.createdAt instanceof Date
@@ -73,7 +75,7 @@ async function getLastSalesByClient(userObjectId) {
 async function getCrmClients(req, res, next) {
   try {
     const userObjectId = new mongoose.Types.ObjectId(req.userId);
-    const { clientGroup, category, search } = req.query;
+    const { clientGroup, category, search, leadSource } = req.query;
 
     const query = { userId: userObjectId };
 
@@ -85,11 +87,25 @@ async function getCrmClients(req, res, next) {
       query.category = category;
     }
 
+    if (leadSource === 'sem_origem') {
+      query.$and = [
+        ...(query.$and ?? []),
+        { $or: [{ leadSource: null }, { leadSource: { $exists: false } }] },
+      ];
+    } else if (leadSource && ['redes_sociais', 'google', 'indicacao', 'outros'].includes(leadSource)) {
+      query.leadSource = leadSource;
+    }
+
     if (search && typeof search === 'string' && search.trim()) {
       const term = search.trim();
-      query.$or = [
-        { name: { $regex: term, $options: 'i' } },
-        { phone: { $regex: term, $options: 'i' } },
+      query.$and = [
+        ...(query.$and ?? []),
+        {
+          $or: [
+            { name: { $regex: term, $options: 'i' } },
+            { phone: { $regex: term, $options: 'i' } },
+          ],
+        },
       ];
     }
 
@@ -118,8 +134,10 @@ async function getCrmDashboard(req, res, next) {
     const { startDate, endDate } = req.query;
 
     const activityQuery = { userId: userObjectId };
+    const clientCreatedRange = {};
     if (startDate || endDate) {
       activityQuery.createdAt = parseDateRange(startDate, endDate);
+      clientCreatedRange.createdAt = activityQuery.createdAt;
     }
 
     const [clients, groupChanges, recentActivities] = await Promise.all([
@@ -147,6 +165,30 @@ async function getCrmDashboard(req, res, next) {
     clients.forEach((client) => {
       const group = client.clientGroup ?? 'grupo_a';
       if (byGroup[group] !== undefined) byGroup[group] += 1;
+    });
+
+    const byLeadSource = {
+      redes_sociais: 0,
+      google: 0,
+      indicacao: 0,
+      outros: 0,
+      sem_origem: 0,
+    };
+
+    const leadQuery = { userId: userObjectId, category: 'lead' };
+    if (clientCreatedRange.createdAt) {
+      leadQuery.createdAt = clientCreatedRange.createdAt;
+    }
+
+    const leadsInPeriod = await Client.find(leadQuery).lean();
+    leadsInPeriod.forEach((lead) => {
+      if (!lead.leadSource) {
+        byLeadSource.sem_origem += 1;
+        return;
+      }
+      if (byLeadSource[lead.leadSource] !== undefined) {
+        byLeadSource[lead.leadSource] += 1;
+      }
     });
 
     let upgrades = 0;
@@ -177,6 +219,8 @@ async function getCrmDashboard(req, res, next) {
         resumo: {
           totalClientes: clients.length,
           byGroup,
+          byLeadSource,
+          totalLeadsPeriodo: leadsInPeriod.length,
           mudancasGrupo: transitionList.length,
           upgrades,
           downgrades,

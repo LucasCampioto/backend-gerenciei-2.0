@@ -44,7 +44,17 @@ const clientSchema = new mongoose.Schema({
     type: String,
     trim: true,
     default: ''
-  }
+  },
+  leadSource: {
+    type: String,
+    enum: ['redes_sociais', 'google', 'indicacao', 'outros', null],
+    default: null,
+  },
+  leadSourceOther: {
+    type: String,
+    trim: true,
+    default: '',
+  },
 }, {
   timestamps: true
 });
