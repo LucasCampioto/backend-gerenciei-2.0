@@ -75,7 +75,7 @@ async function getLastSalesByClient(userObjectId) {
 async function getCrmClients(req, res, next) {
   try {
     const userObjectId = new mongoose.Types.ObjectId(req.userId);
-    const { clientGroup, category, search, leadSource } = req.query;
+    const { clientGroup, category, search, leadSource, page = 1, limit = 10 } = req.query;
 
     const query = { userId: userObjectId };
 
@@ -109,10 +109,17 @@ async function getCrmClients(req, res, next) {
       ];
     }
 
-    const [clients, lastSaleMap] = await Promise.all([
-      Client.find(query).sort({ name: 1 }).lean(),
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 100);
+    const skip = (pageNum - 1) * limitNum;
+
+    const [total, clients, lastSaleMap] = await Promise.all([
+      Client.countDocuments(query),
+      Client.find(query).sort({ name: 1 }).skip(skip).limit(limitNum).lean(),
       getLastSalesByClient(userObjectId),
     ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / limitNum));
 
     const data = clients.map((client) => {
       const formatted = formatCrmClient(client, lastSaleMap);
@@ -122,7 +129,18 @@ async function getCrmClients(req, res, next) {
       return formatted;
     });
 
-    res.json({ success: true, data });
+    res.json({
+      success: true,
+      data,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages,
+        hasNextPage: pageNum < totalPages,
+        hasPrevPage: pageNum > 1,
+      },
+    });
   } catch (error) {
     next(error);
   }

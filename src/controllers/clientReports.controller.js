@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Sale = require('../models/Sale');
 const Client = require('../models/Client');
+const { buildSaleItemsAllocationStages } = require('../utils/saleAggregation');
 
 const TZ = 'America/Sao_Paulo';
 
@@ -75,35 +76,7 @@ async function getProceduresByClient(req, res, next) {
           clientId: { $exists: true, $ne: null },
         },
       },
-      {
-        $addFields: {
-          items: {
-            $map: {
-              input: '$items',
-              as: 'item',
-              in: {
-                $mergeObjects: [
-                  '$$item',
-                  {
-                    netValueAllocated: {
-                      $cond: [
-                        { $gt: ['$totalValue', 0] },
-                        {
-                          $multiply: [
-                            '$netValue',
-                            { $divide: ['$$item.totalValue', '$totalValue'] },
-                          ],
-                        },
-                        0,
-                      ],
-                    },
-                  },
-                ],
-              },
-            },
-          },
-        },
-      },
+      ...buildSaleItemsAllocationStages(),
       { $unwind: '$items' },
       {
         $group: {
@@ -114,7 +87,7 @@ async function getProceduresByClient(req, res, next) {
             procedureName: '$items.procedureName',
           },
           quantidade: { $sum: '$items.quantity' },
-          faturamentoBruto: { $sum: '$items.totalValue' },
+          faturamentoBruto: { $sum: '$items.grossValueAllocated' },
           faturamentoLiquido: { $sum: '$items.netValueAllocated' },
           quantidadeVendas: { $sum: 1 },
         },

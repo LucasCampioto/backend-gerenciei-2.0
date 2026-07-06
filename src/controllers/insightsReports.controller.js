@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Sale = require('../models/Sale');
 const User = require('../models/User');
 const { getEvents } = require('../services/googleCalendar.service');
+const { buildSaleItemsAllocationStages } = require('../utils/saleAggregation');
 
 const TZ = 'America/Sao_Paulo';
 
@@ -318,35 +319,7 @@ async function getProcedureMix(req, res, next) {
     const [mixRows, firstHalfRows, secondHalfRows, comboSales] = await Promise.all([
       Sale.aggregate([
         { $match: { userId: userObjectId, createdAt } },
-        {
-          $addFields: {
-            items: {
-              $map: {
-                input: '$items',
-                as: 'item',
-                in: {
-                  $mergeObjects: [
-                    '$$item',
-                    {
-                      netValueAllocated: {
-                        $cond: [
-                          { $gt: ['$totalValue', 0] },
-                          {
-                            $multiply: [
-                              '$netValue',
-                              { $divide: ['$$item.totalValue', '$totalValue'] },
-                            ],
-                          },
-                          0,
-                        ],
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          },
-        },
+        ...buildSaleItemsAllocationStages(),
         { $unwind: '$items' },
         {
           $group: {
@@ -355,7 +328,7 @@ async function getProcedureMix(req, res, next) {
               procedureName: '$items.procedureName',
             },
             quantidade: { $sum: '$items.quantity' },
-            faturamentoBruto: { $sum: '$items.totalValue' },
+            faturamentoBruto: { $sum: '$items.grossValueAllocated' },
             faturamentoLiquido: { $sum: '$items.netValueAllocated' },
           },
         },
@@ -368,24 +341,12 @@ async function getProcedureMix(req, res, next) {
             createdAt: { $gte: halves.first.start, $lte: halves.first.end },
           },
         },
+        ...buildSaleItemsAllocationStages(),
         { $unwind: '$items' },
         {
           $group: {
             _id: '$items.procedureName',
-            faturamentoLiquido: {
-              $sum: {
-                $cond: [
-                  { $gt: ['$totalValue', 0] },
-                  {
-                    $multiply: [
-                      '$netValue',
-                      { $divide: ['$items.totalValue', '$totalValue'] },
-                    ],
-                  },
-                  0,
-                ],
-              },
-            },
+            faturamentoLiquido: { $sum: '$items.netValueAllocated' },
           },
         },
       ]),
@@ -396,24 +357,12 @@ async function getProcedureMix(req, res, next) {
             createdAt: { $gte: halves.second.start, $lte: halves.second.end },
           },
         },
+        ...buildSaleItemsAllocationStages(),
         { $unwind: '$items' },
         {
           $group: {
             _id: '$items.procedureName',
-            faturamentoLiquido: {
-              $sum: {
-                $cond: [
-                  { $gt: ['$totalValue', 0] },
-                  {
-                    $multiply: [
-                      '$netValue',
-                      { $divide: ['$items.totalValue', '$totalValue'] },
-                    ],
-                  },
-                  0,
-                ],
-              },
-            },
+            faturamentoLiquido: { $sum: '$items.netValueAllocated' },
           },
         },
       ]),

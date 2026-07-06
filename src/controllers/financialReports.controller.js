@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Sale = require('../models/Sale');
 const Expense = require('../models/Expense');
+const { buildSaleItemsAllocationStages } = require('../utils/saleAggregation');
 
 const MONTH_LABELS = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -126,35 +127,7 @@ async function getSalesByProcedure(req, res, next) {
           createdAt,
         },
       },
-      {
-        $addFields: {
-          items: {
-            $map: {
-              input: '$items',
-              as: 'item',
-              in: {
-                $mergeObjects: [
-                  '$$item',
-                  {
-                    netValueAllocated: {
-                      $cond: [
-                        { $gt: ['$totalValue', 0] },
-                        {
-                          $multiply: [
-                            '$netValue',
-                            { $divide: ['$$item.totalValue', '$totalValue'] },
-                          ],
-                        },
-                        0,
-                      ],
-                    },
-                  },
-                ],
-              },
-            },
-          },
-        },
-      },
+      ...buildSaleItemsAllocationStages(),
       { $unwind: '$items' },
       {
         $group: {
@@ -163,7 +136,7 @@ async function getSalesByProcedure(req, res, next) {
             procedureName: '$items.procedureName',
           },
           quantidade: { $sum: '$items.quantity' },
-          faturamentoBruto: { $sum: '$items.totalValue' },
+          faturamentoBruto: { $sum: '$items.grossValueAllocated' },
           faturamentoLiquido: { $sum: '$items.netValueAllocated' },
         },
       },
@@ -265,12 +238,13 @@ async function getTopProcedures(userObjectId, start, end, limit = 3) {
         createdAt: { $gte: start, $lte: end },
       },
     },
+    ...buildSaleItemsAllocationStages(),
     { $unwind: '$items' },
     {
       $group: {
         _id: '$items.procedureName',
         quantidade: { $sum: '$items.quantity' },
-        faturamentoBruto: { $sum: '$items.totalValue' },
+        faturamentoBruto: { $sum: '$items.grossValueAllocated' },
       },
     },
     { $sort: { quantidade: -1, faturamentoBruto: -1 } },
@@ -606,35 +580,7 @@ async function getProceduresByPaymentMethod(req, res, next) {
           paymentMethod,
         },
       },
-      {
-        $addFields: {
-          items: {
-            $map: {
-              input: '$items',
-              as: 'item',
-              in: {
-                $mergeObjects: [
-                  '$$item',
-                  {
-                    netValueAllocated: {
-                      $cond: [
-                        { $gt: ['$totalValue', 0] },
-                        {
-                          $multiply: [
-                            '$netValue',
-                            { $divide: ['$$item.totalValue', '$totalValue'] },
-                          ],
-                        },
-                        0,
-                      ],
-                    },
-                  },
-                ],
-              },
-            },
-          },
-        },
-      },
+      ...buildSaleItemsAllocationStages(),
       { $unwind: '$items' },
       {
         $group: {
@@ -643,7 +589,7 @@ async function getProceduresByPaymentMethod(req, res, next) {
             procedureName: '$items.procedureName',
           },
           quantidade: { $sum: '$items.quantity' },
-          faturamentoBruto: { $sum: '$items.totalValue' },
+          faturamentoBruto: { $sum: '$items.grossValueAllocated' },
           faturamentoLiquido: { $sum: '$items.netValueAllocated' },
         },
       },
