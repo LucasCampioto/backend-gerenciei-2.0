@@ -79,6 +79,8 @@ const calendarRoutes = require('./routes/calendar.routes');
 const reportsRoutes = require('./routes/reports.routes');
 const paymentFeeRoutes = require('./routes/paymentFee.routes');
 const crmRoutes = require('./routes/crm.routes');
+const formRoutes = require('./routes/form.routes');
+const publicFormRoutes = require('./routes/publicForm.routes');
 
 // Usar rotas com prefixo /api
 app.use('/api/auth', authRoutes);
@@ -92,6 +94,8 @@ app.use('/api/calendar', calendarRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/payment-fees', paymentFeeRoutes);
 app.use('/api/crm', crmRoutes);
+app.use('/api/forms', formRoutes);
+app.use('/api/public/forms', publicFormRoutes);
 
 // Rota 404 para API
 app.use('/api', (req, res) => {
