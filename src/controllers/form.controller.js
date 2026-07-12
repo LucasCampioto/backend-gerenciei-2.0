@@ -16,6 +16,7 @@ function formatForm(form, responseCount = 0) {
     publicSlug: obj.publicSlug,
     status: obj.status,
     templateKey: obj.templateKey || 'custom',
+    allowMultipleResponses: obj.allowMultipleResponses === true,
     questions: obj.questions || [],
     responseCount,
     createdAt: obj.createdAt instanceof Date ? obj.createdAt.toISOString() : obj.createdAt,
@@ -78,7 +79,7 @@ async function getFormById(req, res, next) {
 
 async function createForm(req, res, next) {
   try {
-    const { title, description, status, templateKey, questions } = req.body;
+    const { title, description, status, templateKey, questions, allowMultipleResponses } = req.body;
 
     let publicSlug = generatePublicSlug();
     let attempts = 0;
@@ -95,6 +96,7 @@ async function createForm(req, res, next) {
       description: description || '',
       status: status || 'active',
       templateKey: templateKey || 'custom',
+      allowMultipleResponses: allowMultipleResponses === true,
       questions,
       publicSlug,
     });
@@ -114,7 +116,7 @@ async function createForm(req, res, next) {
 async function updateForm(req, res, next) {
   try {
     const { id } = req.params;
-    const { title, description, status, templateKey, questions } = req.body;
+    const { title, description, status, templateKey, questions, allowMultipleResponses } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, error: 'ID inválido' });
@@ -127,6 +129,7 @@ async function updateForm(req, res, next) {
         description: description || '',
         status: status || 'active',
         templateKey: templateKey || 'custom',
+        allowMultipleResponses: allowMultipleResponses === true,
         questions,
       },
       { new: true, runValidators: true }

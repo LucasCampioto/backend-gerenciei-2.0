@@ -30,6 +30,7 @@ const formSchema = Joi.object({
   description: Joi.string().allow('').optional(),
   status: Joi.string().valid('active', 'inactive').default('active'),
   templateKey: Joi.string().valid('nps', 'nao_fechamento', 'pos_procedimento', 'custom').default('custom'),
+  allowMultipleResponses: Joi.boolean().default(false),
   questions: Joi.array().items(questionSchema).min(1).required().messages({
     'array.min': 'Adicione pelo menos uma pergunta',
     'any.required': 'Perguntas são obrigatórias',

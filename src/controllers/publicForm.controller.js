@@ -143,6 +143,20 @@ async function submitPublicResponse(req, res, next) {
       });
     }
 
+    if (!form.allowMultipleResponses) {
+      const existingResponse = await FormResponse.findOne({
+        formId: form._id,
+        clientId: client._id,
+      }).select('_id');
+
+      if (existingResponse) {
+        return res.status(409).json({
+          success: false,
+          error: 'Você já respondeu este formulário. Não é permitido enviar novamente.',
+        });
+      }
+    }
+
     const response = new FormResponse({
       userId: form.userId,
       formId: form._id,

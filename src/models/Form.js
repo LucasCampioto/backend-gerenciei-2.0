@@ -75,6 +75,10 @@ const formSchema = new mongoose.Schema({
     enum: ['nps', 'nao_fechamento', 'pos_procedimento', 'custom'],
     default: 'custom',
   },
+  allowMultipleResponses: {
+    type: Boolean,
+    default: false,
+  },
   questions: {
     type: [questionSchema],
     default: [],
