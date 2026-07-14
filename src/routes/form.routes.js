@@ -10,6 +10,7 @@ const {
 const {
   getFormResponses,
   getFormAnalytics,
+  convertResponseToClient,
 } = require('../controllers/formAnalytics.controller');
 const { validate } = require('../middleware/validation.middleware');
 const { authenticate } = require('../middleware/auth.middleware');
@@ -20,6 +21,7 @@ router.use(authenticate);
 router.get('/', getAllForms);
 router.post('/', validate(formSchema), createForm);
 router.get('/:id/responses', getFormResponses);
+router.post('/:id/responses/:responseId/convert-to-client', convertResponseToClient);
 router.get('/:id/analytics', getFormAnalytics);
 router.get('/:id', getFormById);
 router.put('/:id', validate(formSchema), updateForm);

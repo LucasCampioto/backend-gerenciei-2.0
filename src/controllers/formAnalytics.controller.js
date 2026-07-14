@@ -3,6 +3,8 @@ const FormResponse = require('../models/FormResponse');
 const Client = require('../models/Client');
 const mongoose = require('mongoose');
 const { formatChoiceDisplayValue, normalizeChoiceForAnalytics } = require('../utils/choiceAnswer');
+const { findClientByPhone, stripPhoneDigits } = require('../utils/phoneMatch');
+const { logActivity } = require('../services/clientActivity.service');
 
 function parseDateRange(startDate, endDate) {
   const filter = {};
@@ -20,9 +22,24 @@ function parseDateRange(startDate, endDate) {
   return Object.keys(filter).length ? filter : null;
 }
 
+function isGenericLeadName(name) {
+  const trimmed = String(name || '').trim();
+  return !trimmed || trimmed === 'Lead formulário' || trimmed === '—';
+}
+
+function pickRespondentDisplayName(client, respondentName) {
+  const fromResponse = String(respondentName || '').trim();
+  const fromClient = String(client?.name || '').trim();
+  if (!isGenericLeadName(fromResponse)) return fromResponse;
+  if (!isGenericLeadName(fromClient)) return fromClient;
+  return fromResponse || fromClient || '—';
+}
+
 function formatResponseRow(response, clientMap, questionMap) {
   const obj = response.toObject ? response.toObject() : response;
-  const client = clientMap.get(obj.clientId.toString());
+  const clientId = obj.clientId ? obj.clientId.toString() : '';
+  const client = clientId ? clientMap.get(clientId) : null;
+  const respondentName = String(obj.respondentName || '').trim();
 
   const formattedAnswers = (obj.answers || []).map((answer) => {
     const question = questionMap.get(answer.questionId);
@@ -38,9 +55,11 @@ function formatResponseRow(response, clientMap, questionMap) {
 
   return {
     id: obj._id.toString(),
-    clientId: obj.clientId.toString(),
-    clientName: client?.name || obj.respondentName || '—',
-    clientPhone: client?.phone || obj.respondentPhone,
+    clientId: client?._id?.toString() || clientId,
+    clientExists: Boolean(client),
+    clientName: pickRespondentDisplayName(client, respondentName),
+    respondentName: respondentName || null,
+    clientPhone: client?.phone || obj.respondentPhone || '',
     clientCategory: client?.category || null,
     submittedAt: obj.submittedAt instanceof Date
       ? obj.submittedAt.toISOString()
@@ -194,8 +213,11 @@ async function getFormResponses(req, res, next) {
       FormResponse.countDocuments(query),
     ]);
 
-    const clientIds = [...new Set(responses.map((r) => r.clientId.toString()))];
-    const clients = await Client.find({ _id: { $in: clientIds } }).select('name phone category');
+    const clientIds = [...new Set(responses.map((r) => r.clientId.toString()).filter(Boolean))];
+    const clients = await Client.find({
+      _id: { $in: clientIds },
+      userId: req.userId,
+    }).select('name phone category');
     const clientMap = new Map(clients.map((c) => [c._id.toString(), c]));
     const questionMap = new Map(form.questions.map((q) => [q.id, q]));
 
@@ -209,6 +231,159 @@ async function getFormResponses(req, res, next) {
           total,
           totalPages: Math.ceil(total / limit),
         },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function convertResponseToClient(req, res, next) {
+  try {
+    const { id, responseId } = req.params;
+    const {
+      name,
+      leadSource,
+      leadSourceOther,
+    } = req.body || {};
+
+    if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(responseId)) {
+      return res.status(400).json({ success: false, error: 'ID inválido' });
+    }
+
+    const form = await Form.findOne({ _id: id, userId: req.userId });
+    if (!form) {
+      return res.status(404).json({ success: false, error: 'Formulário não encontrado' });
+    }
+
+    const response = await FormResponse.findOne({
+      _id: responseId,
+      formId: form._id,
+      userId: req.userId,
+    });
+
+    if (!response) {
+      return res.status(404).json({ success: false, error: 'Resposta não encontrada' });
+    }
+
+    const requestedName = typeof name === 'string' ? name.trim() : '';
+    if (!requestedName) {
+      return res.status(400).json({ success: false, error: 'Informe o nome do cliente' });
+    }
+
+    const allowedSources = ['redes_sociais', 'google', 'indicacao', 'outros'];
+    const nextLeadSource =
+      leadSource && allowedSources.includes(leadSource) ? leadSource : null;
+    const nextLeadSourceOther =
+      nextLeadSource === 'outros'
+        ? String(leadSourceOther || '').trim()
+        : '';
+
+    if (nextLeadSource === 'outros' && !nextLeadSourceOther) {
+      return res.status(400).json({
+        success: false,
+        error: 'Informe de onde veio quando selecionar Outros',
+      });
+    }
+
+    let client = null;
+    if (response.clientId && mongoose.Types.ObjectId.isValid(response.clientId)) {
+      client = await Client.findOne({ _id: response.clientId, userId: req.userId });
+    }
+
+    if (!client && response.respondentPhone) {
+      client = await findClientByPhone(Client, req.userId, response.respondentPhone);
+    }
+
+    const formTitle = (form.title || 'Formulário').trim() || 'Formulário';
+    let created = false;
+    let converted = false;
+
+    if (!client) {
+      const phone = stripPhoneDigits(response.respondentPhone || '');
+      if (!phone) {
+        return res.status(400).json({
+          success: false,
+          error: 'Não há telefone nesta resposta para recriar o cadastro',
+        });
+      }
+
+      client = new Client({
+        userId: req.userId,
+        name: requestedName,
+        phone,
+        category: 'cliente',
+        isNewClient: true,
+        convertedAt: new Date(),
+        clientGroup: 'grupo_a',
+        leadSource: nextLeadSource ?? 'outros',
+        leadSourceOther:
+          nextLeadSource === 'outros'
+            ? nextLeadSourceOther
+            : nextLeadSource
+              ? ''
+              : `Formulário: ${formTitle}`.slice(0, 120),
+      });
+      if (!nextLeadSource) {
+        client.leadSource = 'outros';
+        client.leadSourceOther = `Formulário: ${formTitle}`.slice(0, 120);
+      }
+      await client.save();
+      created = true;
+      converted = true;
+
+      await logActivity({
+        userId: req.userId,
+        clientId: client._id,
+        clientName: client.name,
+        type: 'note',
+        content: 'Convertido de lead para cliente (a partir da resposta do formulário)',
+      });
+    } else {
+      client.name = requestedName;
+      if (nextLeadSource !== undefined) {
+        client.leadSource = nextLeadSource;
+        client.leadSourceOther = nextLeadSourceOther;
+      }
+      if (client.category !== 'cliente') {
+        client.category = 'cliente';
+        client.convertedAt = new Date();
+        converted = true;
+        await logActivity({
+          userId: req.userId,
+          clientId: client._id,
+          clientName: client.name,
+          type: 'note',
+          content: 'Convertido de lead para cliente',
+        });
+      }
+      await client.save();
+    }
+
+    if (!response.clientId || response.clientId.toString() !== client._id.toString()) {
+      response.clientId = client._id;
+      await response.save();
+    }
+
+    if (response.respondentName !== requestedName) {
+      response.respondentName = requestedName;
+      await response.save();
+    }
+
+    res.json({
+      success: true,
+      message: converted
+        ? created
+          ? 'Cadastro recriado e convertido em cliente'
+          : 'Lead convertido em cliente'
+        : 'Cliente atualizado',
+      data: {
+        id: client._id.toString(),
+        name: client.name,
+        phone: client.phone,
+        category: client.category,
+        created,
+        converted,
       },
     });
   } catch (error) {
@@ -235,8 +410,11 @@ async function getFormAnalytics(req, res, next) {
 
     const responses = await FormResponse.find(query).sort({ submittedAt: -1 });
 
-    const clientIds = [...new Set(responses.map((r) => r.clientId.toString()))];
-    const clients = await Client.find({ _id: { $in: clientIds } }).select('name phone category');
+    const clientIds = [...new Set(responses.map((r) => r.clientId.toString()).filter(Boolean))];
+    const clients = await Client.find({
+      _id: { $in: clientIds },
+      userId: req.userId,
+    }).select('name phone category');
     const clientMap = new Map(clients.map((c) => [c._id.toString(), c]));
     const questionMap = new Map(form.questions.map((q) => [q.id, q]));
 
@@ -304,4 +482,5 @@ async function getFormAnalytics(req, res, next) {
 module.exports = {
   getFormResponses,
   getFormAnalytics,
+  convertResponseToClient,
 };

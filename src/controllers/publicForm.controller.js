@@ -1,7 +1,7 @@
 const Form = require('../models/Form');
 const FormResponse = require('../models/FormResponse');
 const Client = require('../models/Client');
-const { findClientByPhone, isValidBrazilianPhone } = require('../utils/phoneMatch');
+const { findClientByPhone, isValidBrazilianPhone, stripPhoneDigits } = require('../utils/phoneMatch');
 const { logActivity } = require('../services/clientActivity.service');
 const { isOtherAnswer, isChoiceAnswerEmpty } = require('../utils/choiceAnswer');
 
@@ -135,12 +135,28 @@ async function submitPublicResponse(req, res, next) {
       return res.status(400).json({ success: false, error: validationError });
     }
 
-    const client = await findClientByPhone(Client, form.userId, phone);
+    let client = await findClientByPhone(Client, form.userId, phone);
+    const typedName = typeof name === 'string' ? name.trim() : '';
     if (!client) {
-      return res.status(404).json({
-        success: false,
-        error: 'Telefone não encontrado. Entre em contato com a clínica.',
+      const normalizedPhone = stripPhoneDigits(phone);
+      const formTitle = (form.title || 'Formulário').trim() || 'Formulário';
+      client = new Client({
+        userId: form.userId,
+        name: typedName || 'Lead formulário',
+        phone: normalizedPhone,
+        category: 'lead',
+        isNewClient: true,
+        clientGroup: 'grupo_a',
+        leadSource: 'outros',
+        leadSourceOther: `Formulário: ${formTitle}`.slice(0, 120),
       });
+      await client.save();
+    } else if (typedName) {
+      const currentName = (client.name || '').trim();
+      if (!currentName || currentName === 'Lead formulário') {
+        client.name = typedName;
+        await client.save();
+      }
     }
 
     if (!form.allowMultipleResponses) {
@@ -162,7 +178,7 @@ async function submitPublicResponse(req, res, next) {
       formId: form._id,
       clientId: client._id,
       respondentPhone: client.phone,
-      respondentName: (name || client.name || '').trim(),
+      respondentName: typedName || '',
       answers,
       submittedAt: new Date(),
     });

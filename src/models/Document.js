@@ -44,7 +44,20 @@ const documentSchema = new mongoose.Schema({
   status: {
     type: String,
     default: 'Assinado'
-  }
+  },
+  clientId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Client',
+    index: true,
+  },
+  saleId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Sale',
+  },
+  procedureId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Procedure',
+  },
 }, {
   timestamps: true
 });

@@ -14,7 +14,10 @@ const documentSchema = Joi.object({
     'string.email': 'Email inválido',
     'any.required': 'Email do usuário é obrigatório'
   }),
-  observations: Joi.string().allow('').optional()
+  observations: Joi.string().allow('').optional(),
+  clientId: Joi.string().allow('').optional(),
+  saleId: Joi.string().allow('').optional(),
+  procedureId: Joi.string().allow('').optional(),
 }).custom((value, helpers) => {
   // Validar que há fileUrl ou que será fornecido via upload
   // A validação completa será feita no controller
@@ -24,4 +27,3 @@ const documentSchema = Joi.object({
 module.exports = {
   documentSchema
 };
-

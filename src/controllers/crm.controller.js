@@ -8,6 +8,10 @@ const {
   getGroupDirection,
   GROUP_ORDER,
 } = require('../services/clientActivity.service');
+const { buildActionQueue, getDueReturns } = require('../services/actionQueue.service');
+const Document = require('../models/Document');
+const FormResponse = require('../models/FormResponse');
+const Form = require('../models/Form');
 
 function parseDateRange(startDate, endDate) {
   const range = {};
@@ -279,7 +283,16 @@ async function getClientHistory(req, res, next) {
 async function updateCrmClient(req, res, next) {
   try {
     const { id } = req.params;
-    const { clientGroup, noReturnReason, improvementReason, note } = req.body;
+    const {
+      name,
+      category,
+      clientGroup,
+      noReturnReason,
+      improvementReason,
+      leadSource,
+      leadSourceOther,
+      note,
+    } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, error: 'ID inválido' });
@@ -291,13 +304,51 @@ async function updateCrmClient(req, res, next) {
     }
 
     const updateData = {};
+    const displayName = typeof name === 'string' && name.trim() ? name.trim() : existing.name;
+
+    if (typeof name === 'string' && name.trim() && name.trim() !== existing.name) {
+      updateData.name = name.trim();
+    }
+
+    if (category !== undefined && category !== existing.category) {
+      updateData.category = category;
+      if (category === 'cliente' && existing.category !== 'cliente') {
+        updateData.convertedAt = new Date();
+        await logActivity({
+          userId: req.userId,
+          clientId: existing._id,
+          clientName: displayName,
+          type: 'note',
+          content: 'Convertido de lead para cliente',
+        });
+      }
+      if (category === 'lead') {
+        updateData.convertedAt = null;
+      }
+    }
+
+    if (leadSource !== undefined && leadSource !== existing.leadSource) {
+      updateData.leadSource = leadSource;
+    }
+
+    if (leadSourceOther !== undefined) {
+      const nextOther =
+        (leadSource !== undefined ? leadSource : existing.leadSource) === 'outros'
+          ? String(leadSourceOther || '').trim()
+          : '';
+      if (nextOther !== (existing.leadSourceOther || '')) {
+        updateData.leadSourceOther = nextOther;
+      }
+    } else if (leadSource !== undefined && leadSource !== 'outros') {
+      updateData.leadSourceOther = '';
+    }
 
     if (clientGroup !== undefined && clientGroup !== existing.clientGroup) {
       updateData.clientGroup = clientGroup;
       await logActivity({
         userId: req.userId,
         clientId: existing._id,
-        clientName: existing.name,
+        clientName: displayName,
         type: 'group_change',
         fromGroup: existing.clientGroup,
         toGroup: clientGroup,
@@ -310,7 +361,7 @@ async function updateCrmClient(req, res, next) {
       await logActivity({
         userId: req.userId,
         clientId: existing._id,
-        clientName: existing.name,
+        clientName: displayName,
         type: 'reason_update',
         content: noReturnReason,
       });
@@ -321,7 +372,7 @@ async function updateCrmClient(req, res, next) {
       await logActivity({
         userId: req.userId,
         clientId: existing._id,
-        clientName: existing.name,
+        clientName: displayName,
         type: 'reason_update',
         content: improvementReason ? `Motivo da melhora: ${improvementReason}` : 'Motivo da melhora removido',
       });
@@ -331,7 +382,7 @@ async function updateCrmClient(req, res, next) {
       await logActivity({
         userId: req.userId,
         clientId: existing._id,
-        clientName: existing.name,
+        clientName: displayName,
         type: 'note',
         content: note,
       });
@@ -420,6 +471,167 @@ async function deleteCrmActivity(req, res, next) {
   }
 }
 
+async function getActionQueue(req, res, next) {
+  try {
+    const queue = await buildActionQueue(req.userId);
+    res.json({
+      success: true,
+      data: {
+        items: queue.items,
+        count: queue.items.length,
+        dueReturnsCount: queue.dueReturnsCount,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getDueReturnsHandler(req, res, next) {
+  try {
+    const withinDays = Math.min(Math.max(parseInt(req.query.withinDays, 10) || 14, 1), 180);
+    const dueReturns = await getDueReturns(req.userId, { withinDays });
+    res.json({
+      success: true,
+      data: dueReturns,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getClientJourney(req, res, next) {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, error: 'ID inválido' });
+    }
+
+    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const clientObjectId = new mongoose.Types.ObjectId(id);
+
+    const client = await Client.findOne({ _id: clientObjectId, userId: userObjectId }).lean();
+    if (!client) {
+      return res.status(404).json({ success: false, error: 'Cliente não encontrado' });
+    }
+
+    const [activities, sales, formResponses, documents] = await Promise.all([
+      ClientActivity.find({ userId: userObjectId, clientId: clientObjectId })
+        .sort({ createdAt: -1 })
+        .lean(),
+      Sale.find({ userId: userObjectId, clientId: clientObjectId })
+        .sort({ createdAt: -1 })
+        .lean(),
+      FormResponse.find({ userId: userObjectId, clientId: clientObjectId })
+        .sort({ submittedAt: -1 })
+        .lean(),
+      Document.find({ userId: userObjectId, clientId: clientObjectId })
+        .sort({ signedAt: -1 })
+        .lean(),
+    ]);
+
+    const formIds = [...new Set(formResponses.map((r) => r.formId?.toString()).filter(Boolean))];
+    const forms = formIds.length
+      ? await Form.find({ _id: { $in: formIds } }).select('_id title').lean()
+      : [];
+    const formTitleMap = new Map(forms.map((f) => [f._id.toString(), f.title]));
+
+    const events = [];
+
+    events.push({
+      type: 'client_created',
+      title: client.category === 'lead' ? 'Lead cadastrado' : 'Cliente cadastrado',
+      detail: client.name,
+      date: client.createdAt,
+      meta: { category: client.category, clientGroup: client.clientGroup },
+    });
+
+    const ACTIVITY_TITLES = {
+      group_change: 'Mudança de grupo',
+      initial_group: 'Grupo inicial',
+      note: 'Observação',
+      contact: 'Contato',
+      reason_update: 'Motivo atualizado',
+      form_response: 'Resposta de formulário',
+    };
+
+    for (const activity of activities) {
+      events.push({
+        type: activity.type,
+        title: ACTIVITY_TITLES[activity.type] || activity.type,
+        detail: activity.content || '',
+        date: activity.createdAt,
+        meta: {
+          fromGroup: activity.fromGroup,
+          toGroup: activity.toGroup,
+          activityId: activity._id.toString(),
+        },
+      });
+    }
+
+    for (const sale of sales) {
+      events.push({
+        type: 'sale',
+        title: 'Venda registrada',
+        detail: `${(sale.items || []).map((i) => i.procedureName).join(', ') || 'Procedimento'} · R$ ${Number(sale.netValue || 0).toFixed(2)}`,
+        date: sale.createdAt,
+        meta: {
+          saleId: sale._id.toString(),
+          netValue: sale.netValue,
+          totalValue: sale.totalValue,
+        },
+      });
+    }
+
+    for (const response of formResponses) {
+      events.push({
+        type: 'form_response',
+        title: 'Formulário respondido',
+        detail: formTitleMap.get(response.formId?.toString()) || 'Formulário',
+        date: response.submittedAt || response.createdAt,
+        meta: {
+          formId: response.formId?.toString(),
+          responseId: response._id.toString(),
+        },
+      });
+    }
+
+    for (const doc of documents) {
+      events.push({
+        type: 'document',
+        title: 'Documento assinado',
+        detail: doc.fileName || 'Documento',
+        date: doc.signedAt || doc.createdAt,
+        meta: {
+          documentId: doc._id.toString(),
+          fileName: doc.fileName,
+        },
+      });
+    }
+
+    events.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    res.json({
+      success: true,
+      data: {
+        client: {
+          id: client._id.toString(),
+          name: client.name,
+          phone: client.phone,
+          category: client.category,
+          clientGroup: client.clientGroup,
+        },
+        events: events.map((e) => ({
+          ...e,
+          date: e.date instanceof Date ? e.date.toISOString() : e.date,
+        })),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   getCrmClients,
   getCrmDashboard,
@@ -427,4 +639,7 @@ module.exports = {
   updateCrmClient,
   addCrmAction,
   deleteCrmActivity,
+  getActionQueue,
+  getDueReturnsHandler,
+  getClientJourney,
 };

@@ -97,7 +97,11 @@ const saleSchema = new mongoose.Schema({
   },
   clientPhone: {
     type: String
-  }
+  },
+  isDemo: {
+    type: Boolean,
+    default: false,
+  },
 }, {
   timestamps: true
 });

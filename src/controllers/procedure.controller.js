@@ -9,6 +9,7 @@ function formatProcedure(procedure) {
     name: obj.name,
     description: obj.description,
     value: obj.value,
+    returnAfterDays: obj.returnAfterDays ?? null,
     createdAt: obj.createdAt
   };
 }
@@ -29,13 +30,16 @@ async function getAllProcedures(req, res, next) {
 
 async function createProcedure(req, res, next) {
   try {
-    const { name, description, value } = req.body;
+    const { name, description, value, returnAfterDays } = req.body;
     
     const procedure = new Procedure({
       userId: req.userId,
       name,
       description,
-      value
+      value,
+      returnAfterDays: returnAfterDays === undefined || returnAfterDays === ''
+        ? null
+        : returnAfterDays,
     });
     
     await procedure.save();
@@ -53,7 +57,7 @@ async function createProcedure(req, res, next) {
 async function updateProcedure(req, res, next) {
   try {
     const { id } = req.params;
-    const { name, description, value } = req.body;
+    const { name, description, value, returnAfterDays } = req.body;
     
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -62,9 +66,14 @@ async function updateProcedure(req, res, next) {
       });
     }
     
+    const update = { name, description, value };
+    if (returnAfterDays !== undefined) {
+      update.returnAfterDays = returnAfterDays === '' ? null : returnAfterDays;
+    }
+
     const procedure = await Procedure.findOneAndUpdate(
       { _id: id, userId: req.userId },
-      { name, description, value },
+      update,
       { new: true, runValidators: true }
     );
     

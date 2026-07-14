@@ -3,6 +3,12 @@ const mongoose = require('mongoose');
 const { s3Client, BUCKET_NAME, isS3Available } = require('../config/s3');
 const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
 
+function toOptionalObjectId(value) {
+  if (!value || value === '') return undefined;
+  if (!mongoose.Types.ObjectId.isValid(value)) return undefined;
+  return value;
+}
+
 function formatDocument(doc) {
   const obj = doc.toObject();
   return {
@@ -15,7 +21,10 @@ function formatDocument(doc) {
     observations: obj.observations,
     signatureUrl: obj.signatureUrl,
     signedAt: obj.signedAt,
-    status: obj.status
+    status: obj.status,
+    clientId: obj.clientId ? obj.clientId.toString() : null,
+    saleId: obj.saleId ? obj.saleId.toString() : null,
+    procedureId: obj.procedureId ? obj.procedureId.toString() : null,
   };
 }
 
@@ -46,7 +55,18 @@ async function getAllDocuments(req, res, next) {
 
 async function createDocument(req, res, next) {
   try {
-    let { fileName, fileType, fileUrl, signatureUrl, userName, userEmail, observations } = req.body;
+    let {
+      fileName,
+      fileType,
+      fileUrl,
+      signatureUrl,
+      userName,
+      userEmail,
+      observations,
+      clientId,
+      saleId,
+      procedureId,
+    } = req.body;
     
     // Se houver arquivo no upload, processar
     let finalFileUrl = fileUrl;
@@ -98,6 +118,9 @@ async function createDocument(req, res, next) {
       userName,
       userEmail,
       observations: observations || undefined,
+      clientId: toOptionalObjectId(clientId),
+      saleId: toOptionalObjectId(saleId),
+      procedureId: toOptionalObjectId(procedureId),
       status: 'Assinado'
     });
     

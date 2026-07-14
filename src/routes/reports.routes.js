@@ -20,10 +20,12 @@ const {
   getClientRecurrence,
   getLeadConversionFunnel,
 } = require('../controllers/clientReports.controller');
+const { getBusinessHealth } = require('../controllers/businessHealth.controller');
 const { authenticate } = require('../middleware/auth.middleware');
 
 router.use(authenticate);
 
+router.get('/business-health', getBusinessHealth);
 router.get('/annual-balance', getAnnualBalance);
 router.get('/monthly-revenue', getMonthlyRevenue);
 router.get('/sales-by-procedure', getSalesByProcedure);

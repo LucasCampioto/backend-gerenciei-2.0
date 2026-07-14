@@ -81,6 +81,8 @@ const paymentFeeRoutes = require('./routes/paymentFee.routes');
 const crmRoutes = require('./routes/crm.routes');
 const formRoutes = require('./routes/form.routes');
 const publicFormRoutes = require('./routes/publicForm.routes');
+const homeRoutes = require('./routes/home.routes');
+const onboardingRoutes = require('./routes/onboarding.routes');
 
 // Usar rotas com prefixo /api
 app.use('/api/auth', authRoutes);
@@ -96,6 +98,8 @@ app.use('/api/payment-fees', paymentFeeRoutes);
 app.use('/api/crm', crmRoutes);
 app.use('/api/forms', formRoutes);
 app.use('/api/public/forms', publicFormRoutes);
+app.use('/api/home', homeRoutes);
+app.use('/api/onboarding', onboardingRoutes);
 
 // Rota 404 para API
 app.use('/api', (req, res) => {

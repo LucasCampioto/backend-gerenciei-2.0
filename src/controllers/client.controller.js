@@ -1,4 +1,5 @@
 const Client = require('../models/Client');
+const ClientActivity = require('../models/ClientActivity');
 const mongoose = require('mongoose');
 const { logActivity } = require('../services/clientActivity.service');
 
@@ -183,6 +184,11 @@ async function deleteClient(req, res, next) {
         error: 'Cliente não encontrado'
       });
     }
+
+    await ClientActivity.deleteMany({
+      userId: req.userId,
+      clientId: client._id,
+    });
 
     res.json({
       success: true,

@@ -11,10 +11,12 @@ const procedureSchema = Joi.object({
   value: Joi.number().min(0).required().messages({
     'number.min': 'Valor deve ser positivo',
     'any.required': 'Valor é obrigatório'
+  }),
+  returnAfterDays: Joi.number().min(1).allow(null).optional().messages({
+    'number.min': 'Retorno em dias deve ser no mínimo 1'
   })
 });
 
 module.exports = {
   procedureSchema
 };
-

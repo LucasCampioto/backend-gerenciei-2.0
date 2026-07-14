@@ -48,7 +48,11 @@ const userSchema = new mongoose.Schema({
   googleCalendarName: {
     type: String,
     default: null
-  }
+  },
+  onboardingCompleted: {
+    type: Boolean,
+    default: false,
+  },
 }, {
   timestamps: true
 });

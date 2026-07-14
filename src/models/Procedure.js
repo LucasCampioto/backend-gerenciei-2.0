@@ -21,7 +21,12 @@ const procedureSchema = new mongoose.Schema({
     type: Number,
     required: true,
     min: 0
-  }
+  },
+  returnAfterDays: {
+    type: Number,
+    min: 1,
+    default: null,
+  },
 }, {
   timestamps: true
 });
