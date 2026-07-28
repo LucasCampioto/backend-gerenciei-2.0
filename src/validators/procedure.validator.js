@@ -14,7 +14,15 @@ const procedureSchema = Joi.object({
   }),
   returnAfterDays: Joi.number().min(1).allow(null).optional().messages({
     'number.min': 'Retorno em dias deve ser no mínimo 1'
-  })
+  }),
+  category: Joi.string()
+    .valid('estetica', 'cursos', 'estetica_avancada')
+    .required()
+    .messages({
+      'any.only': 'Categoria inválida. Use: estética, cursos ou estética avançada',
+      'any.required': 'Categoria é obrigatória'
+    }),
+  compatibleWith: Joi.array().items(Joi.string()).optional()
 });
 
 module.exports = {

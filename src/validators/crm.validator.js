@@ -9,6 +9,13 @@ const updateCrmClientSchema = Joi.object({
   leadSource: Joi.string().valid('redes_sociais', 'google', 'indicacao', 'outros').allow(null).optional(),
   leadSourceOther: Joi.string().allow('').optional(),
   note: Joi.string().allow('').optional(),
+  pipelineStage: Joi.string()
+    .valid('new', 'qualified', 'proposal', 'negotiation', 'won', 'lost')
+    .allow(null)
+    .optional(),
+  nextFollowUpAt: Joi.date().iso().allow(null).optional(),
+  lostReason: Joi.string().allow('').optional(),
+  assignedTo: Joi.string().allow('').optional(),
 });
 
 const addCrmActionSchema = Joi.object({

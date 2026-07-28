@@ -90,6 +90,7 @@ async function getProceduresByClient(req, res, next) {
           faturamentoBruto: { $sum: '$items.grossValueAllocated' },
           faturamentoLiquido: { $sum: '$items.netValueAllocated' },
           quantidadeVendas: { $sum: 1 },
+          datas: { $push: '$createdAt' },
         },
       },
       { $sort: { '_id.clientName': 1, faturamentoLiquido: -1 } },
@@ -116,6 +117,10 @@ async function getProceduresByClient(req, res, next) {
       }
 
       const client = clientsMap.get(clientId);
+      const datas = (row.datas || [])
+        .filter(Boolean)
+        .sort((a, b) => new Date(b) - new Date(a))
+        .map((d) => new Date(d).toISOString());
       client.procedures.push({
         procedureId: row._id.procedureId?.toString?.() ?? row._id.procedureId,
         procedureName: row._id.procedureName,
@@ -123,6 +128,7 @@ async function getProceduresByClient(req, res, next) {
         faturamentoBruto: round2(row.faturamentoBruto),
         faturamentoLiquido: round2(row.faturamentoLiquido),
         quantidadeVendas: row.quantidadeVendas,
+        datas,
       });
 
       client.totais.quantidadeProcedimentos += row.quantidade;

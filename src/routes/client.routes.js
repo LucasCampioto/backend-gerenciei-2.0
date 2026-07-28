@@ -4,7 +4,8 @@ const {
   getAllClients,
   createClient,
   updateClient,
-  deleteClient
+  deleteClient,
+  recordPhotoConsent,
 } = require('../controllers/client.controller');
 const { validate } = require('../middleware/validation.middleware');
 const { authenticate } = require('../middleware/auth.middleware');
@@ -14,6 +15,7 @@ router.use(authenticate);
 
 router.get('/', getAllClients);
 router.post('/', validate(clientSchema), createClient);
+router.post('/:id/photo-consent', recordPhotoConsent);
 router.put('/:id', validate(clientSchema), updateClient);
 router.delete('/:id', deleteClient);
 

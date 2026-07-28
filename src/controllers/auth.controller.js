@@ -1,57 +1,36 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const {
+  findUserByEmail,
+  verifyPassword,
+  userToPublic,
+  findUserById,
+  findUserByIdWithQuotaReset,
+  updateUserPassword,
+  acceptUserTerms,
+} = require('../services/simulation/usersBilling');
+const { LEGAL_VERSION } = require('../legal/version');
 
-// Validar JWT_SECRET
 if (!process.env.JWT_SECRET) {
   console.error('❌ JWT_SECRET não está definido nas variáveis de ambiente!');
 }
 
-async function signup(req, res, next) {
-  try {
-    if (!process.env.JWT_SECRET) {
-      return res.status(500).json({
-        success: false,
-        error: 'Configuração do servidor incompleta'
-      });
-    }
+function signToken(user) {
+  return jwt.sign(
+    { userId: user._id, email: user.email },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' },
+  );
+}
 
-    const { name, email, password } = req.body;
-    
-    // Verificar se o email já existe
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        error: 'Email já está em uso'
-      });
-    }
-    
-    // Criar usuário
-    const user = new User({ name, email, password });
-    await user.save();
-    
-    // Gerar token
-    const token = jwt.sign(
-      { userId: user._id, email: user.email },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-    );
-    
-    res.status(201).json({
-      success: true,
-      data: {
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email
-        },
-        token
-      },
-      message: 'Usuário criado com sucesso'
-    });
-  } catch (error) {
-    next(error);
-  }
+/** Cadastro público desativado — conta criada via checkout Stripe ou admin. */
+async function signup(_req, res) {
+  res.status(403).json({
+    success: false,
+    error:
+      'Cadastro público desativado. Assine um plano em nosso site ou utilize a conta criada pelo administrador.',
+    message:
+      'Cadastro público desativado. Assine um plano em nosso site ou utilize a conta criada pelo administrador.',
+  });
 }
 
 async function login(req, res, next) {
@@ -59,48 +38,36 @@ async function login(req, res, next) {
     if (!process.env.JWT_SECRET) {
       return res.status(500).json({
         success: false,
-        error: 'Configuração do servidor incompleta'
+        error: 'Configuração do servidor incompleta',
       });
     }
 
     const { email, password } = req.body;
-    
-    // Buscar usuário
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(401).json({
+    if (!email || !password) {
+      return res.status(400).json({
         success: false,
-        error: 'Email ou senha inválidos'
+        error: 'E-mail e senha são obrigatórios',
       });
     }
-    
-    // Verificar senha
-    const isPasswordValid = await user.comparePassword(password);
-    if (!isPasswordValid) {
+
+    const user = await findUserByEmail(email);
+    if (!user || !(await verifyPassword(user, password))) {
       return res.status(401).json({
         success: false,
-        error: 'Email ou senha inválidos'
+        error: 'Email ou senha inválidos',
       });
     }
-    
-    // Gerar token
-    const token = jwt.sign(
-      { userId: user._id, email: user.email },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-    );
-    
+
+    const token = signToken(user);
+    const userWithQuota = (await findUserByIdWithQuotaReset(user._id)) || user;
+
     res.json({
       success: true,
       data: {
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email
-        },
-        token
+        user: userToPublic(userWithQuota),
+        token,
       },
-      message: 'Login realizado com sucesso'
+      message: 'Login realizado com sucesso',
     });
   } catch (error) {
     next(error);
@@ -109,11 +76,9 @@ async function login(req, res, next) {
 
 async function logout(req, res, next) {
   try {
-    // No caso de JWT stateless, o logout é feito no front-end removendo o token
-    // Mas podemos adicionar lógica de blacklist aqui se necessário
     res.json({
       success: true,
-      message: 'Logout realizado com sucesso'
+      message: 'Logout realizado com sucesso',
     });
   } catch (error) {
     next(error);
@@ -122,21 +87,99 @@ async function logout(req, res, next) {
 
 async function getMe(req, res, next) {
   try {
-    const user = await User.findById(req.userId);
+    const user = await findUserByIdWithQuotaReset(req.userId);
     if (!user) {
       return res.status(404).json({
         success: false,
-        error: 'Usuário não encontrado'
+        error: 'Usuário não encontrado',
       });
     }
-    
+
     res.json({
       success: true,
-      data: {
-        id: user._id,
-        name: user.name,
-        email: user.email
-      }
+      data: userToPublic(user),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function acceptTerms(req, res, next) {
+  try {
+    const { termsVersion, acceptTerms: acceptTermsFlag, acceptPrivacy, acceptPatientResponsibility } =
+      req.body || {};
+    const version = String(termsVersion || '').trim();
+    if (version !== LEGAL_VERSION) {
+      return res.status(400).json({
+        success: false,
+        error: 'Versão dos termos desatualizada. Recarregue a página e tente novamente.',
+        message: 'Versão dos termos desatualizada. Recarregue a página e tente novamente.',
+      });
+    }
+    const result = await acceptUserTerms(req.userId, {
+      termsVersion: version,
+      acceptTerms: acceptTermsFlag === true,
+      acceptPrivacy: acceptPrivacy === true,
+      acceptPatientResponsibility: acceptPatientResponsibility === true,
+    });
+    if (result.error) {
+      return res.status(result.status || 400).json({
+        success: false,
+        error: result.error,
+        message: result.error,
+      });
+    }
+    res.json({
+      success: true,
+      data: userToPublic(result.user),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function changePassword(req, res, next) {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        error: 'Senha atual e nova senha são obrigatórias',
+      });
+    }
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({
+        success: false,
+        error: 'A nova senha deve ter pelo menos 8 caracteres',
+      });
+    }
+
+    const user = await findUserById(req.userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'Usuário não encontrado',
+      });
+    }
+    if (!(await verifyPassword(user, currentPassword))) {
+      return res.status(401).json({
+        success: false,
+        error: 'Senha atual inválida',
+      });
+    }
+
+    const updated = await updateUserPassword(user._id, newPassword, { firstAccess: false });
+    if (!updated) {
+      return res.status(404).json({
+        success: false,
+        error: 'Usuário não encontrado',
+      });
+    }
+
+    res.json({
+      success: true,
+      data: userToPublic(updated),
+      message: 'Senha alterada com sucesso',
     });
   } catch (error) {
     next(error);
@@ -147,6 +190,7 @@ module.exports = {
   signup,
   login,
   logout,
-  getMe
+  getMe,
+  acceptTerms,
+  changePassword,
 };
-

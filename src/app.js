@@ -4,21 +4,16 @@ const dotenv = require('dotenv');
 const path = require('path');
 const { URL } = require('url');
 
-// Carregar variáveis de ambiente
 dotenv.config();
 
 const app = express();
 
-// Middlewares
-// Configuração de CORS mais permissiva para desenvolvimento
 app.use(cors({
-  origin: true, // Permite todas as origens
+  origin: true,
   credentials: true
 }));
 
-// Middleware para parsear query params manualmente (necessário na Vercel)
 app.use((req, res, next) => {
-  // Se houver query params na URL, sempre parsear manualmente (Vercel não faz isso corretamente)
   if (req.url && req.url.includes('?')) {
     try {
       const fullUrl = `https://${req.headers.host || 'localhost'}${req.url}`;
@@ -27,7 +22,6 @@ app.use((req, res, next) => {
       urlObj.searchParams.forEach((value, key) => {
         parsedQuery[key] = value;
       });
-      // Só sobrescrever se realmente parseou algo ou se req.query estava vazio
       if (Object.keys(parsedQuery).length > 0 || !req.query || Object.keys(req.query).length === 0) {
         req.query = parsedQuery;
         console.log('📋 [EXPRESS] Query params parseados manualmente:', req.query);
@@ -39,7 +33,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Middleware para debug (temporário)
 app.use((req, res, next) => {
   console.log('🔍 [EXPRESS] Request:', {
     method: req.method,
@@ -52,22 +45,41 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
+const { stripeWebhookHandler } = require('./routes/stripeWebhook.routes');
+
+/** Stripe webhook MUST use raw body BEFORE express.json (signature verification). */
+app.post(
+  '/api/stripe/webhook',
+  express.raw({ type: 'application/json' }),
+  (req, res) => {
+    void stripeWebhookHandler(req, res);
+  },
+);
+
+app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Servir arquivos estáticos de uploads
+const JWT_SECRET = process.env.JWT_SECRET;
+const { createBillingLockGuard } = require('./middleware/billingLock.middleware');
+const { createTermsAcceptanceGuard } = require('./middleware/termsAcceptance.middleware');
+
+if (JWT_SECRET) {
+  app.use(createBillingLockGuard(JWT_SECRET));
+  app.use(createTermsAcceptanceGuard(JWT_SECRET));
+} else {
+  console.warn('⚠️ JWT_SECRET ausente — billing/terms guards não aplicados');
+}
+
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
-// Rota de health check
 app.get('/health', (req, res) => {
-  res.json({ 
-    success: true, 
+  res.json({
+    success: true,
     message: 'Server is running',
     timestamp: new Date().toISOString()
   });
 });
 
-// Importar rotas
 const authRoutes = require('./routes/auth.routes');
 const procedureRoutes = require('./routes/procedure.routes');
 const employeeRoutes = require('./routes/employee.routes');
@@ -83,8 +95,16 @@ const formRoutes = require('./routes/form.routes');
 const publicFormRoutes = require('./routes/publicForm.routes');
 const homeRoutes = require('./routes/home.routes');
 const onboardingRoutes = require('./routes/onboarding.routes');
+const commercialRoutes = require('./routes/commercial.routes');
+const internalRoutes = require('./routes/internal.routes');
+const subscriptionRoutes = require('./routes/subscription.routes');
+const adminSimulationRoutes = require('./routes/adminSimulation.routes');
+const enhanceRoutes = require('./routes/enhance.routes');
+const enhancePairsRoutes = require('./routes/enhancePairs.routes');
+const simulationRoutes = require('./routes/simulation.routes');
 
-// Usar rotas com prefixo /api
+app.use(enhanceRoutes);
+
 app.use('/api/auth', authRoutes);
 app.use('/api/procedures', procedureRoutes);
 app.use('/api/employees', employeeRoutes);
@@ -98,10 +118,19 @@ app.use('/api/payment-fees', paymentFeeRoutes);
 app.use('/api/crm', crmRoutes);
 app.use('/api/forms', formRoutes);
 app.use('/api/public/forms', publicFormRoutes);
+app.use('/api/campaigns', require('./routes/campaign.routes'));
+app.use('/api/public/campaigns', require('./routes/publicCampaign.routes'));
+app.use('/api/marketing', require('./routes/marketing.routes'));
 app.use('/api/home', homeRoutes);
 app.use('/api/onboarding', onboardingRoutes);
+app.use('/api/commercial', commercialRoutes);
+app.use('/api/internal', internalRoutes);
+app.use('/api/subscriptions', subscriptionRoutes);
+app.use('/api/admin', adminSimulationRoutes);
+app.use('/api', enhancePairsRoutes);
+app.use('/api', simulationRoutes);
+app.use('/api', require('./routes/pricingBases.routes'));
 
-// Rota 404 para API
 app.use('/api', (req, res) => {
   res.status(404).json({
     success: false,
@@ -109,7 +138,6 @@ app.use('/api', (req, res) => {
   });
 });
 
-// Middleware de tratamento de erros
 const { errorHandler } = require('./middleware/errorHandler.middleware');
 app.use(errorHandler);
 

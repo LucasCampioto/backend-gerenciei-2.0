@@ -348,6 +348,16 @@ async function convertResponseToClient(req, res, next) {
       if (client.category !== 'cliente') {
         client.category = 'cliente';
         client.convertedAt = new Date();
+        const stageNow = client.pipelineStage ?? 'new';
+        if (
+          !stageNow ||
+          stageNow === 'new' ||
+          stageNow === 'qualified' ||
+          stageNow === 'proposal' ||
+          stageNow === 'negotiation'
+        ) {
+          client.pipelineStage = 'won';
+        }
         converted = true;
         await logActivity({
           userId: req.userId,

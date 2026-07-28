@@ -1,7 +1,31 @@
 const Sale = require('../models/Sale');
 const Employee = require('../models/Employee');
+const Client = require('../models/Client');
 const mongoose = require('mongoose');
 const { getFeePercentageForUser, round2 } = require('./paymentFee.controller');
+const { logActivity } = require('../services/clientActivity.service');
+const CommercialAction = require('../models/CommercialAction');
+const {
+  promoteLeadFromSale,
+  syncLeadsWithSales,
+} = require('../services/leadConversion.service');
+
+/** Datas YYYY-MM-DD no fuso da clínica (Brasília). */
+const CLINIC_TZ_OFFSET = '-03:00';
+
+function parseClinicDayStart(dateStr) {
+  if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr.trim())) {
+    return new Date(`${dateStr.trim()}T00:00:00.000${CLINIC_TZ_OFFSET}`);
+  }
+  return new Date(dateStr);
+}
+
+function parseClinicDayEnd(dateStr) {
+  if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr.trim())) {
+    return new Date(`${dateStr.trim()}T23:59:59.999${CLINIC_TZ_OFFSET}`);
+  }
+  return new Date(dateStr);
+}
 
 function formatSale(sale) {
   const obj = sale.toObject();
@@ -34,29 +58,22 @@ function formatSale(sale) {
 
 async function getAllSales(req, res, next) {
   try {
+    // Garante: lead com venda → cliente
+    await syncLeadsWithSales(req.userId).catch(() => {});
+
     const { startDate, endDate, employeeId, clientId, page = 1, limit = 10 } = req.query;
     
     const query = { userId: req.userId };
     
     if (startDate || endDate) {
       query.createdAt = {};
-      let parsedStartDate = null;
-      let parsedEndDate = null;
       
       if (startDate) {
-        parsedStartDate = new Date(startDate);
-        query.createdAt.$gte = parsedStartDate;
+        query.createdAt.$gte = parseClinicDayStart(startDate);
       }
       if (endDate) {
-        parsedEndDate = new Date(endDate);
-        // Se endDate não tem horário (apenas data), ajustar para final do dia em UTC
-        // Verificar se a string original não tinha horário (formato YYYY-MM-DD)
-        if (typeof endDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(endDate.trim())) {
-          parsedEndDate.setUTCHours(23, 59, 59, 999);
-        }
-        query.createdAt.$lte = parsedEndDate;
+        query.createdAt.$lte = parseClinicDayEnd(endDate);
       }
-      
     }
     
     if (employeeId && mongoose.Types.ObjectId.isValid(employeeId)) {
@@ -65,6 +82,17 @@ async function getAllSales(req, res, next) {
 
     if (clientId && mongoose.Types.ObjectId.isValid(clientId)) {
       query.clientId = clientId;
+    }
+
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    if (search) {
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, 'i');
+      query.$or = [
+        { clientName: regex },
+        { clientPhone: regex },
+        { 'items.procedureName': regex },
+      ];
     }
     
     // Converter page e limit para números
@@ -95,28 +123,27 @@ async function getAllSales(req, res, next) {
     
     if (startDate || endDate) {
       allSalesQuery.createdAt = {};
-      let parsedStartDateAll = null;
-      let parsedEndDateAll = null;
-      
       if (startDate) {
-        parsedStartDateAll = new Date(startDate);
-        allSalesQuery.createdAt.$gte = parsedStartDateAll;
+        allSalesQuery.createdAt.$gte = parseClinicDayStart(startDate);
       }
       if (endDate) {
-        parsedEndDateAll = new Date(endDate);
-        // Se endDate não tem horário (apenas data), ajustar para final do dia em UTC
-        // Verificar se a string original não tinha horário (formato YYYY-MM-DD)
-        if (typeof endDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(endDate.trim())) {
-          parsedEndDateAll.setUTCHours(23, 59, 59, 999);
-        }
-        allSalesQuery.createdAt.$lte = parsedEndDateAll;
+        allSalesQuery.createdAt.$lte = parseClinicDayEnd(endDate);
       }
-      
     }
     
     // Se houver filtro específico de employeeId, aplicar
     if (employeeId && mongoose.Types.ObjectId.isValid(employeeId)) {
       allSalesQuery.employeeId = new mongoose.Types.ObjectId(employeeId);
+    }
+
+    if (search) {
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, 'i');
+      allSalesQuery.$or = [
+        { clientName: regex },
+        { clientPhone: regex },
+        { 'items.procedureName': regex },
+      ];
     }
 
     const allSales = await Sale.find(allSalesQuery);
@@ -265,6 +292,48 @@ async function createSale(req, res, next) {
     });
     
     await sale.save();
+
+    const linkedClient = await promoteLeadFromSale(req.userId, {
+      clientId,
+      clientPhone,
+    });
+
+    if (linkedClient) {
+      if (!sale.clientId) {
+        sale.clientId = linkedClient._id;
+        if (!sale.clientName) sale.clientName = linkedClient.name;
+        if (!sale.clientPhone) sale.clientPhone = linkedClient.phone;
+        await sale.save();
+      }
+
+      const recommendationId = req.body.recommendationId || '';
+      await logActivity({
+        userId: req.userId,
+        clientId: linkedClient._id,
+        clientName: linkedClient.name,
+        type: recommendationId ? 'recommendation_used' : 'note',
+        content: recommendationId
+          ? `Venda registrada usando recomendação ${recommendationId} · R$ ${calculatedNetValue}`
+          : `Venda registrada · R$ ${calculatedNetValue}`,
+      });
+
+      await CommercialAction.updateMany(
+        {
+          userId: req.userId,
+          clientId: linkedClient._id,
+          status: 'pending',
+        },
+        {
+          $set: {
+            status: 'done',
+            outcome: 'won',
+            realizedRevenue: calculatedNetValue,
+            completedAt: new Date(),
+            feedback: 'accepted',
+          },
+        }
+      );
+    }
     
     res.status(201).json({
       success: true,

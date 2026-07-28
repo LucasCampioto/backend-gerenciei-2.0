@@ -149,14 +149,24 @@ async function submitPublicResponse(req, res, next) {
         clientGroup: 'grupo_a',
         leadSource: 'outros',
         leadSourceOther: `Formulário: ${formTitle}`.slice(0, 120),
+        sourceFormId: form._id,
       });
       await client.save();
-    } else if (typedName) {
-      const currentName = (client.name || '').trim();
-      if (!currentName || currentName === 'Lead formulário') {
-        client.name = typedName;
-        await client.save();
+    } else {
+      let dirty = false;
+      if (typedName) {
+        const currentName = (client.name || '').trim();
+        if (!currentName || currentName === 'Lead formulário') {
+          client.name = typedName;
+          dirty = true;
+        }
       }
+      // Preserva a primeira origem: só grava se o cliente ainda não tem nenhuma
+      if (!client.sourceCampaignId && !client.sourceFormId) {
+        client.sourceFormId = form._id;
+        dirty = true;
+      }
+      if (dirty) await client.save();
     }
 
     if (!form.allowMultipleResponses) {
@@ -191,6 +201,28 @@ async function submitPublicResponse(req, res, next) {
       clientName: client.name,
       type: 'form_response',
       content: `Respondeu formulário: ${form.title}`,
+    });
+
+    // Qualificação comercial em background (não bloqueia resposta ao paciente).
+    // Sincroniza regras da fila sem re-rodar ranking Agno se o cache do dia já existir.
+    setImmediate(() => {
+      const {
+        qualifyClient,
+        buildClosingQueue,
+        runDailyAiAnalyses,
+      } = require('../services/commercialIntelligence.service');
+      const aiDailyCache = require('../services/aiDailyCache.service');
+      qualifyClient(form.userId.toString(), client._id.toString(), { force: true, advanceStage: false })
+        .then(async () => {
+          await buildClosingQueue(form.userId.toString(), { refresh: true, runAiRank: false });
+          const rankCache = await aiDailyCache.getDaily(form.userId.toString(), 'closing_rank');
+          if (!rankCache?.payload) {
+            await runDailyAiAnalyses(form.userId.toString());
+          }
+        })
+        .catch((err) => {
+          console.warn('[publicForm] qualify/queue skipped:', err.message);
+        });
     });
 
     res.status(201).json({

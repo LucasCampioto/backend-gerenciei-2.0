@@ -53,6 +53,106 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  clinic: {
+    type: String,
+    default: '',
+    trim: true,
+  },
+  phone: {
+    type: String,
+    default: '',
+    trim: true,
+  },
+  notifEmail: {
+    type: Boolean,
+    default: true,
+  },
+  notifSms: {
+    type: Boolean,
+    default: false,
+  },
+  firstAccess: {
+    type: Boolean,
+    default: false,
+  },
+  stripeCustomerId: {
+    type: String,
+    trim: true,
+    sparse: true,
+    unique: true,
+  },
+  stripeSubscriptionId: {
+    type: String,
+    trim: true,
+    sparse: true,
+    unique: true,
+  },
+  subscriptionStatus: {
+    type: String,
+    default: '',
+    trim: true,
+  },
+  trialEndsAt: {
+    type: Date,
+    default: null,
+  },
+  currentPeriodEnd: {
+    type: Date,
+    default: null,
+  },
+  cancelAtPeriodEnd: {
+    type: Boolean,
+    default: false,
+  },
+  simulationMonthlyQuota: {
+    type: Number,
+    default: 0,
+  },
+  simulationCreditsRemaining: {
+    type: Number,
+    default: 0,
+  },
+  simulationQuotaPeriodKey: {
+    type: String,
+    default: '',
+  },
+  previewMonthlyQuota: {
+    type: Number,
+    default: 0,
+  },
+  previewCreditsRemaining: {
+    type: Number,
+    default: 0,
+  },
+  previewQuotaPeriodKey: {
+    type: String,
+    default: '',
+  },
+  accountType: {
+    type: String,
+    enum: ['official', 'partner_test'],
+    default: 'official',
+  },
+  partnerTestExpiresAt: {
+    type: Date,
+    default: null,
+  },
+  termsAcceptedAt: {
+    type: Date,
+    default: null,
+  },
+  privacyAcceptedAt: {
+    type: Date,
+    default: null,
+  },
+  termsVersion: {
+    type: String,
+    default: '',
+  },
+  patientDataResponsibilityAckAt: {
+    type: Date,
+    default: null,
+  },
 }, {
   timestamps: true
 });

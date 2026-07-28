@@ -27,6 +27,17 @@ const procedureSchema = new mongoose.Schema({
     min: 1,
     default: null,
   },
+  /** estetica | cursos | estetica_avancada — só estética avançada entra na simulação. */
+  category: {
+    type: String,
+    enum: ['estetica', 'cursos', 'estetica_avancada'],
+    trim: true,
+    default: undefined,
+  },
+  compatibleWith: {
+    type: [String],
+    default: [],
+  },
 }, {
   timestamps: true
 });

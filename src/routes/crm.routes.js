@@ -10,6 +10,7 @@ const {
   getActionQueue,
   getDueReturnsHandler,
   getClientJourney,
+  getPipelineBoard,
 } = require('../controllers/crm.controller');
 const { validate } = require('../middleware/validation.middleware');
 const { authenticate } = require('../middleware/auth.middleware');
@@ -21,6 +22,7 @@ const {
 router.use(authenticate);
 
 router.get('/clients', getCrmClients);
+router.get('/pipeline', getPipelineBoard);
 router.get('/dashboard', getCrmDashboard);
 router.get('/action-queue', getActionQueue);
 router.get('/due-returns', getDueReturnsHandler);

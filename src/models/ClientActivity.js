@@ -19,7 +19,20 @@ const clientActivitySchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['group_change', 'initial_group', 'note', 'contact', 'reason_update', 'form_response'],
+    enum: [
+      'group_change',
+      'initial_group',
+      'note',
+      'contact',
+      'reason_update',
+      'form_response',
+      'objection',
+      'recommendation_used',
+      'action_outcome',
+      'qualification',
+      'simulation',
+      'stage_change',
+    ],
     required: true,
   },
   fromGroup: {

@@ -21,6 +21,7 @@ const {
   getLeadConversionFunnel,
 } = require('../controllers/clientReports.controller');
 const { getBusinessHealth } = require('../controllers/businessHealth.controller');
+const { getSourceFunnel } = require('../controllers/sourceFunnel.controller');
 const { authenticate } = require('../middleware/auth.middleware');
 
 router.use(authenticate);
@@ -40,5 +41,6 @@ router.get('/calendar-occupancy', getCalendarOccupancy);
 router.get('/procedures-by-client', getProceduresByClient);
 router.get('/client-recurrence', getClientRecurrence);
 router.get('/lead-conversion-funnel', getLeadConversionFunnel);
+router.get('/source-funnel', getSourceFunnel);
 
 module.exports = router;

@@ -1,6 +1,9 @@
 const mongoose = require('mongoose');
 const Sale = require('../models/Sale');
 const Expense = require('../models/Expense');
+const {
+  buildClosingQueue,
+} = require('../services/commercialIntelligence.service');
 
 const MONTH_LABELS = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -370,6 +373,69 @@ async function getBusinessHealth(req, res, next) {
       taxaRecorrencia,
     });
 
+    const closingQueue = await buildClosingQueue(req.userId, { refresh: false }).catch(() => ({
+      items: [],
+      count: 0,
+      totalExpectedValue: 0,
+    }));
+
+    const pipelineForecast = round2(
+      (closingQueue.totalExpectedValue || 0) * Math.max(0.2, Math.min(0.8, (score || 50) / 100))
+    );
+
+    const aiDailyCache = require('../services/aiDailyCache.service');
+    const {
+      runDailyAiAnalyses,
+    } = require('../services/commercialIntelligence.service');
+
+    const directorFacts = {
+      queueCount: closingQueue.count,
+      revenueAtRisk: closingQueue.totalExpectedValue,
+      todayNet: currentSales.faturamentoLiquido,
+      topActions: closingQueue.items.slice(0, 5),
+      anomalies: insights
+        .filter((i) => i.severity === 'critical' || i.severity === 'warning')
+        .slice(0, 3)
+        .map((i) => i.message || i.title || ''),
+      health: {
+        score,
+        lucro,
+        ticketMedio: currentSales.ticketMedio,
+        taxaRecorrencia,
+        variacoes,
+        pipelineForecast,
+      },
+    };
+
+    // Lê briefing do cache diário (mesmo da Home). Sem LLM no request.
+    const directorCache = await aiDailyCache.getDaily(req.userId, 'director');
+    let director = directorCache?.payload || null;
+    if (!director) {
+      director = {
+        narrative: `Saúde do negócio: score ${score}. Receita em risco estimada R$ ${Math.round(closingQueue.totalExpectedValue || 0).toLocaleString('pt-BR')}.`,
+        anomalies: directorFacts.anomalies || [],
+        ownerActions: (closingQueue.items || []).slice(0, 3).map((a) => ({
+          title: a.clientName
+            ? `${a.suggestedAction || 'Contato'} — ${a.clientName}`
+            : a.suggestedAction || a.reason,
+          clientId: a.clientId,
+          expectedValue: a.expectedValue || 0,
+          why: a.reason,
+        })),
+        revenueAtRisk: closingQueue.totalExpectedValue || 0,
+        source: 'rule',
+        fromCache: false,
+      };
+
+      setImmediate(() => {
+        runDailyAiAnalyses(req.userId, { directorFacts }).catch((err) => {
+          console.warn('[businessHealth] daily AI skipped:', err.message);
+        });
+      });
+    } else {
+      director = { ...director, fromCache: true };
+    }
+
     res.json({
       success: true,
       data: {
@@ -386,6 +452,8 @@ async function getBusinessHealth(req, res, next) {
           ticketMedio: currentSales.ticketMedio,
           gastos: currentExpenses,
           ...(taxaRecorrencia !== null ? { taxaRecorrencia } : {}),
+          receitaEmRisco: closingQueue.totalExpectedValue || 0,
+          previsaoPipeline: pipelineForecast,
         },
         variacoes: {
           faturamentoLiquido: variacoes.faturamentoLiquido,
@@ -395,6 +463,11 @@ async function getBusinessHealth(req, res, next) {
           ticketMedio: variacoes.ticketMedio,
         },
         insights,
+        director,
+        closingQueueSummary: {
+          count: closingQueue.count,
+          totalExpectedValue: closingQueue.totalExpectedValue || 0,
+        },
       },
     });
   } catch (error) {

@@ -9,6 +9,8 @@ const {
   GROUP_ORDER,
 } = require('../services/clientActivity.service');
 const { buildActionQueue, getDueReturns } = require('../services/actionQueue.service');
+const { formatJourneyPlan, syncClientPipelineWithJourney } = require('../services/journeyPlan.service');
+const { syncLeadsWithSales } = require('../services/leadConversion.service');
 const Document = require('../models/Document');
 const FormResponse = require('../models/FormResponse');
 const Form = require('../models/Form');
@@ -26,6 +28,52 @@ function parseDateRange(startDate, endDate) {
   return range;
 }
 
+function formatConversationCoach(coach) {
+  if (!coach || !coach.approach) return null;
+  return {
+    mode: coach.mode === 'close' ? 'close' : coach.mode === 'discovery' ? 'discovery' : null,
+    approach: coach.approach || '',
+    talkingPoints: Array.isArray(coach.talkingPoints) ? coach.talkingPoints : [],
+    closeTechnique: coach.closeTechnique || '',
+    closeScript: coach.closeScript || '',
+    whatsappMessage: coach.whatsappMessage || '',
+    techniques: Array.isArray(coach.techniques) ? coach.techniques : [],
+    objectionHints: Array.isArray(coach.objectionHints) ? coach.objectionHints : [],
+    source: coach.source || '',
+    agentRunId: coach.agentRunId || '',
+    generatedAt: coach.generatedAt
+      ? (coach.generatedAt instanceof Date
+        ? coach.generatedAt.toISOString()
+        : coach.generatedAt)
+      : null,
+  };
+}
+
+function formatSuggestedOffer(offer) {
+  if (!offer || !offer.packageName) return null;
+  return {
+    packageName: offer.packageName || '',
+    procedures: Array.isArray(offer.procedures)
+      ? offer.procedures.map((p) => ({
+          id: p.id || '',
+          name: p.name || '',
+          value: Number(p.value) || 0,
+        }))
+      : [],
+    priceAnchor: Number(offer.priceAnchor) || 0,
+    installmentSuggestion: offer.installmentSuggestion || '',
+    upsell: offer.upsell || '',
+    rationale: offer.rationale || '',
+    source: offer.source || '',
+    agentRunId: offer.agentRunId || '',
+    generatedAt: offer.generatedAt
+      ? (offer.generatedAt instanceof Date
+        ? offer.generatedAt.toISOString()
+        : offer.generatedAt)
+      : null,
+  };
+}
+
 function formatCrmClient(client, lastSaleMap) {
   const id = client._id.toString();
   const lastSale = lastSaleMap.get(id);
@@ -40,6 +88,20 @@ function formatCrmClient(client, lastSaleMap) {
     improvementReason: client.improvementReason ?? '',
     leadSource: client.leadSource ?? null,
     leadSourceOther: client.leadSourceOther ?? '',
+    pipelineStage: client.pipelineStage ?? 'new',
+    leadScore: client.leadScore ?? null,
+    leadTemperature: client.leadTemperature ?? null,
+    qualification: client.qualification ?? null,
+    journeyPlan: formatJourneyPlan(client.journeyPlan),
+    conversationCoach: formatConversationCoach(client.conversationCoach),
+    suggestedOffer: formatSuggestedOffer(client.suggestedOffer),
+    nextFollowUpAt: client.nextFollowUpAt
+      ? (client.nextFollowUpAt instanceof Date
+        ? client.nextFollowUpAt.toISOString()
+        : client.nextFollowUpAt)
+      : null,
+    lostReason: client.lostReason ?? '',
+    assignedTo: client.assignedTo ?? '',
     lastAppointment: lastSale?.lastAppointment ?? null,
     totalSales: lastSale?.totalSales ?? 0,
     createdAt: client.createdAt instanceof Date
@@ -76,10 +138,29 @@ async function getLastSalesByClient(userObjectId) {
   );
 }
 
+const PIPELINE_STAGES = ['new', 'qualified', 'proposal', 'negotiation', 'won', 'lost'];
+
+const PIPELINE_STAGE_LABELS = {
+  new: 'Lead entra',
+  qualified: 'Qualificado',
+  proposal: 'Plano + preço',
+  negotiation: 'Conversa',
+  won: 'Venda',
+  lost: 'Perdido',
+};
+
 async function getCrmClients(req, res, next) {
   try {
     const userObjectId = new mongoose.Types.ObjectId(req.userId);
-    const { clientGroup, category, search, leadSource, page = 1, limit = 10 } = req.query;
+    const {
+      clientGroup,
+      category,
+      search,
+      leadSource,
+      pipelineStage,
+      page = 1,
+      limit = 10,
+    } = req.query;
 
     const query = { userId: userObjectId };
 
@@ -89,6 +170,28 @@ async function getCrmClients(req, res, next) {
 
     if (category && ['lead', 'cliente'].includes(category)) {
       query.category = category;
+    }
+
+    if (pipelineStage && PIPELINE_STAGES.includes(pipelineStage)) {
+      // Etapas ativas do funil comercial = só category lead
+      const activeStages = ['new', 'qualified', 'proposal', 'negotiation'];
+      if (activeStages.includes(pipelineStage) && !category) {
+        query.category = 'lead';
+      }
+      if (pipelineStage === 'new') {
+        query.$and = [
+          ...(query.$and ?? []),
+          {
+            $or: [
+              { pipelineStage: 'new' },
+              { pipelineStage: null },
+              { pipelineStage: { $exists: false } },
+            ],
+          },
+        ];
+      } else {
+        query.pipelineStage = pipelineStage;
+      }
     }
 
     if (leadSource === 'sem_origem') {
@@ -292,6 +395,10 @@ async function updateCrmClient(req, res, next) {
       leadSource,
       leadSourceOther,
       note,
+      pipelineStage,
+      nextFollowUpAt,
+      lostReason,
+      assignedTo,
     } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -306,6 +413,14 @@ async function updateCrmClient(req, res, next) {
     const updateData = {};
     const displayName = typeof name === 'string' && name.trim() ? name.trim() : existing.name;
 
+    const previousStage = existing.pipelineStage ?? 'new';
+    if (pipelineStage !== undefined) updateData.pipelineStage = pipelineStage;
+    if (nextFollowUpAt !== undefined) {
+      updateData.nextFollowUpAt = nextFollowUpAt ? new Date(nextFollowUpAt) : null;
+    }
+    if (lostReason !== undefined) updateData.lostReason = lostReason;
+    if (assignedTo !== undefined) updateData.assignedTo = assignedTo;
+
     if (typeof name === 'string' && name.trim() && name.trim() !== existing.name) {
       updateData.name = name.trim();
     }
@@ -314,6 +429,18 @@ async function updateCrmClient(req, res, next) {
       updateData.category = category;
       if (category === 'cliente' && existing.category !== 'cliente') {
         updateData.convertedAt = new Date();
+        // Cliente sai do funil comercial ativo (Lead entra / Qualifica / Oferta / Conversa)
+        const stageNow =
+          pipelineStage !== undefined ? pipelineStage : (existing.pipelineStage ?? 'new');
+        if (
+          !stageNow ||
+          stageNow === 'new' ||
+          stageNow === 'qualified' ||
+          stageNow === 'proposal' ||
+          stageNow === 'negotiation'
+        ) {
+          updateData.pipelineStage = 'won';
+        }
         await logActivity({
           userId: req.userId,
           clientId: existing._id,
@@ -375,6 +502,25 @@ async function updateCrmClient(req, res, next) {
         clientName: displayName,
         type: 'reason_update',
         content: improvementReason ? `Motivo da melhora: ${improvementReason}` : 'Motivo da melhora removido',
+      });
+    }
+
+    if (
+      pipelineStage !== undefined &&
+      pipelineStage !== previousStage
+    ) {
+      const fromLabel = PIPELINE_STAGE_LABELS[previousStage] || previousStage;
+      const toLabel = PIPELINE_STAGE_LABELS[pipelineStage] || pipelineStage;
+      const reasonSuffix =
+        pipelineStage === 'lost' && lostReason
+          ? ` · Motivo: ${String(lostReason).trim()}`
+          : '';
+      await logActivity({
+        userId: req.userId,
+        clientId: existing._id,
+        clientName: displayName,
+        type: 'stage_change',
+        content: `${fromLabel} → ${toLabel}${reasonSuffix}`,
       });
     }
 
@@ -553,6 +699,12 @@ async function getClientJourney(req, res, next) {
       contact: 'Contato',
       reason_update: 'Motivo atualizado',
       form_response: 'Resposta de formulário',
+      objection: 'Objeção',
+      recommendation_used: 'Recomendação usada',
+      action_outcome: 'Resultado de ação',
+      qualification: 'Qualificação',
+      simulation: 'Simulação',
+      stage_change: 'Mudança de etapa',
     };
 
     for (const activity of activities) {
@@ -620,11 +772,149 @@ async function getClientJourney(req, res, next) {
           phone: client.phone,
           category: client.category,
           clientGroup: client.clientGroup,
+          pipelineStage: client.pipelineStage ?? 'new',
+          leadScore: client.leadScore ?? null,
+          qualification: client.qualification ?? null,
+          nextFollowUpAt: client.nextFollowUpAt ?? null,
         },
         events: events.map((e) => ({
           ...e,
           date: e.date instanceof Date ? e.date.toISOString() : e.date,
         })),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getPipelineBoard(req, res, next) {
+  try {
+    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const wonLostDays = Math.min(Math.max(parseInt(req.query.wonLostDays, 10) || 60, 7), 365);
+    const wonLostCutoff = new Date();
+    wonLostCutoff.setDate(wonLostCutoff.getDate() - wonLostDays);
+
+    // Lead com venda → cliente; cliente em etapa ativa → won
+    await syncLeadsWithSales(req.userId).catch(() => {});
+    await Client.updateMany(
+      {
+        userId: userObjectId,
+        category: 'cliente',
+        $or: [
+          { pipelineStage: { $in: ['new', 'qualified', 'proposal', 'negotiation'] } },
+          { pipelineStage: null },
+          { pipelineStage: { $exists: false } },
+        ],
+      },
+      { $set: { pipelineStage: 'won' } }
+    ).catch(() => {});
+
+    // Funil comercial ativo = só category lead.
+    // won/lost inclui quem já virou cliente (ex.: após venda).
+    const [activeClients, closedClients, lastSaleMap] = await Promise.all([
+      Client.find({
+        userId: userObjectId,
+        category: 'lead',
+        $or: [
+          { pipelineStage: { $in: ['new', 'qualified', 'proposal', 'negotiation'] } },
+          { pipelineStage: null },
+          { pipelineStage: { $exists: false } },
+        ],
+      })
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .limit(400)
+        .lean(),
+      Client.find({
+        userId: userObjectId,
+        pipelineStage: { $in: ['won', 'lost'] },
+        updatedAt: { $gte: wonLostCutoff },
+      })
+        .sort({ updatedAt: -1 })
+        .limit(200)
+        .lean(),
+      getLastSalesByClient(userObjectId),
+    ]);
+
+    const byStage = Object.fromEntries(PIPELINE_STAGES.map((s) => [s, []]));
+    const counts = Object.fromEntries(PIPELINE_STAGES.map((s) => [s, 0]));
+
+    // Corrige leads em Descoberta que estavam em negotiation (apareciam em Oferta)
+    const stageFixes = [];
+    for (const client of activeClients) {
+      const before = client.pipelineStage;
+      const dirty = syncClientPipelineWithJourney(client);
+      if (dirty && client.pipelineStage !== before) {
+        stageFixes.push({
+          updateOne: {
+            filter: { _id: client._id, userId: userObjectId },
+            update: {
+              $set: {
+                pipelineStage: client.pipelineStage,
+                journeyPlan: client.journeyPlan,
+              },
+            },
+          },
+        });
+      }
+    }
+    if (stageFixes.length) {
+      await Client.bulkWrite(stageFixes, { ordered: false }).catch(() => {});
+    }
+
+    const pushClient = (client) => {
+      const stage = PIPELINE_STAGES.includes(client.pipelineStage)
+        ? client.pipelineStage
+        : 'new';
+      const formatted = formatCrmClient(client, lastSaleMap);
+      if (formatted.lastAppointment) {
+        formatted.lastAppointment = new Date(formatted.lastAppointment).toISOString();
+      }
+      byStage[stage].push(formatted);
+    };
+
+    for (const client of activeClients) pushClient(client);
+    for (const client of closedClients) pushClient(client);
+
+    // Contagens: etapas ativas só lead; won/lost todos (lead convertido vira cliente)
+    const countRows = await Client.aggregate([
+      {
+        $match: {
+          userId: userObjectId,
+          $or: [
+            {
+              category: 'lead',
+              $or: [
+                { pipelineStage: { $in: ['new', 'qualified', 'proposal', 'negotiation'] } },
+                { pipelineStage: null },
+                { pipelineStage: { $exists: false } },
+              ],
+            },
+            { pipelineStage: { $in: ['won', 'lost'] } },
+          ],
+        },
+      },
+      {
+        $group: {
+          _id: {
+            $ifNull: ['$pipelineStage', 'new'],
+          },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    for (const row of countRows) {
+      const key = PIPELINE_STAGES.includes(row._id) ? row._id : 'new';
+      counts[key] += row.count;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        stages: byStage,
+        counts,
+        wonLostDays,
       },
     });
   } catch (error) {
@@ -642,4 +932,5 @@ module.exports = {
   getActionQueue,
   getDueReturnsHandler,
   getClientJourney,
+  getPipelineBoard,
 };

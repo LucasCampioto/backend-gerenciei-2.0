@@ -10,13 +10,21 @@ function formatProcedure(procedure) {
     description: obj.description,
     value: obj.value,
     returnAfterDays: obj.returnAfterDays ?? null,
+    category: obj.category || null,
+    compatibleWith: Array.isArray(obj.compatibleWith) ? obj.compatibleWith : [],
     createdAt: obj.createdAt
   };
 }
 
 async function getAllProcedures(req, res, next) {
   try {
-    const procedures = await Procedure.find({ userId: req.userId })
+    const query = { userId: req.userId };
+    const category = typeof req.query.category === 'string' ? req.query.category.trim() : '';
+    if (category === 'estetica' || category === 'cursos' || category === 'estetica_avancada') {
+      query.category = category;
+    }
+
+    const procedures = await Procedure.find(query)
       .sort({ createdAt: -1 });
     
     res.json({
@@ -30,13 +38,15 @@ async function getAllProcedures(req, res, next) {
 
 async function createProcedure(req, res, next) {
   try {
-    const { name, description, value, returnAfterDays } = req.body;
+    const { name, description, value, returnAfterDays, category, compatibleWith } = req.body;
     
     const procedure = new Procedure({
       userId: req.userId,
       name,
       description,
       value,
+      category,
+      compatibleWith: Array.isArray(compatibleWith) ? compatibleWith : [],
       returnAfterDays: returnAfterDays === undefined || returnAfterDays === ''
         ? null
         : returnAfterDays,
@@ -57,7 +67,7 @@ async function createProcedure(req, res, next) {
 async function updateProcedure(req, res, next) {
   try {
     const { id } = req.params;
-    const { name, description, value, returnAfterDays } = req.body;
+    const { name, description, value, returnAfterDays, category, compatibleWith } = req.body;
     
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -66,9 +76,12 @@ async function updateProcedure(req, res, next) {
       });
     }
     
-    const update = { name, description, value };
+    const update = { name, description, value, category };
     if (returnAfterDays !== undefined) {
       update.returnAfterDays = returnAfterDays === '' ? null : returnAfterDays;
+    }
+    if (compatibleWith !== undefined) {
+      update.compatibleWith = Array.isArray(compatibleWith) ? compatibleWith : [];
     }
 
     const procedure = await Procedure.findOneAndUpdate(
