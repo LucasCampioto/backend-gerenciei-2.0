@@ -698,6 +698,55 @@ function sanitizeCalculatorContent(content, topic, procedures = []) {
   return { ...content, calculator: calc };
 }
 
+/** Quiz/diagnóstico: scale só 1–5; orçamento vira single_choice com faixas. */
+function sanitizeQuizScaleScreens(content) {
+  if (!content?.quiz?.screens) return content;
+  const screens = content.quiz.screens.map((screen) => {
+    if (screen.type !== 'question' || !screen.question) return screen;
+    const q = { ...screen.question };
+    const title = String(screen.title || q.label || '');
+    const isBudget =
+      /or[cç]ament|invest|quanto.*(pagar|gastar)|dispost.*pagar|faixa de pre[cç]o/i.test(title);
+
+    if (q.kind === 'scale' && isBudget) {
+      return {
+        ...screen,
+        title: title.replace(/\?$/, '') || 'Como prefere começar o investimento?',
+        question: {
+          kind: 'single_choice',
+          options: [
+            { label: 'Começar pelo essencial (menor investimento)', weights: {} },
+            { label: 'Investimento intermediário', weights: {} },
+            { label: 'Melhor encaixe, mesmo investindo mais', weights: {} },
+            { label: 'Ainda quero entender as opções', weights: {} },
+          ],
+        },
+      };
+    }
+
+    if (q.kind === 'scale') {
+      let min = Number(q.scaleMin);
+      let max = Number(q.scaleMax);
+      if (!Number.isFinite(min)) min = 1;
+      if (!Number.isFinite(max)) max = 5;
+      min = Math.round(min);
+      max = Math.round(max);
+      if (max < min) [min, max] = [max, min];
+      if (max - min + 1 > 5 || min < 1 || max > 10) {
+        min = 1;
+        max = 5;
+      }
+      q.scaleMin = min;
+      q.scaleMax = max;
+      return { ...screen, question: q };
+    }
+
+    return screen;
+  });
+
+  return { ...content, quiz: { ...content.quiz, screens } };
+}
+
 /* ---------- Checklist / Avaliação / eBook / Quiz: temas alinhados ao tipo ---------- */
 
 const CHECKLIST_ANGLE_POOL = [
@@ -1549,6 +1598,10 @@ async function getCampaign(userId, id) {
       console.warn('[campaign] calculator get sanitize failed:', err.message);
     }
   }
+  const magnet = normalizeLeadMagnetType(row.leadMagnetType);
+  if ((magnet === 'diagnosis' || magnet === 'quiz') && row.content?.quiz?.screens) {
+    row.content = sanitizeQuizScaleScreens(row.content);
+  }
   return withPdfUrl(formatCampaign(row));
 }
 
@@ -1979,6 +2032,14 @@ async function generateCampaignContent(userId, id) {
     });
   }
 
+  // Quiz/diagnóstico: escala só 1–5; orçamento nunca em scale
+  if (
+    (leadMagnetType === 'diagnosis' || leadMagnetType === 'quiz') &&
+    Array.isArray(content?.quiz?.screens)
+  ) {
+    content = sanitizeQuizScaleScreens(content);
+  }
+
   if (leadMagnetType === 'calculator') {
     content = sanitizeCalculatorContent(content, brief.topic, focusProcedures);
   }
@@ -2135,6 +2196,14 @@ async function getPublicCampaign(slug) {
   const contactWhatsApp = campaign.contactWhatsApp || user?.phone || '';
   const diagnosisVariant = normalizeDiagnosisVariant(campaign.diagnosisVariant);
 
+  let quizOut = quiz;
+  if (
+    (leadMagnetType === 'diagnosis' || leadMagnetType === 'quiz') &&
+    quizOut?.screens
+  ) {
+    quizOut = sanitizeQuizScaleScreens({ quiz: quizOut }).quiz;
+  }
+
   if (leadMagnetType === 'calculator' && calculator) {
     try {
       const { procedures } = await buildClinicBrief(campaign.userId);
@@ -2186,7 +2255,7 @@ async function getPublicCampaign(slug) {
       subtitle: ebook.subtitle || checklist?.subtitle || '',
       coverTagline: ebook.coverTagline || '',
     },
-    quiz: isFunnelMagnet(leadMagnetType) ? quiz : undefined,
+    quiz: isFunnelMagnet(leadMagnetType) ? quizOut : undefined,
     checklist: leadMagnetType === 'checklist' ? checklist : undefined,
     calculator: leadMagnetType === 'calculator' ? calculator : undefined,
     evaluation: leadMagnetType === 'evaluation' ? evaluation : undefined,
