@@ -613,20 +613,33 @@ async function getProceduresByPaymentMethod(req, res, next) {
 async function getMonthComparison(req, res, next) {
   try {
     const userObjectId = new mongoose.Types.ObjectId(req.userId);
-    const monthsCount = Math.min(Math.max(parseInt(req.query.months, 10) || 12, 2), 24);
-
     const now = new Date();
-    let year = now.getUTCFullYear();
-    let month = now.getUTCMonth() + 1;
+    const currentYear = now.getUTCFullYear();
+    const currentMonth = now.getUTCMonth() + 1;
 
+    const yearParam = parseInt(req.query.year, 10);
     const months = [];
-    for (let i = 0; i < monthsCount; i++) {
-      months.unshift({ year, month });
-      month -= 1;
-      if (month === 0) {
-        month = 12;
-        year -= 1;
+
+    if (Number.isFinite(yearParam) && yearParam >= 2000 && yearParam <= currentYear + 1) {
+      // Ano civil: janeiro → dezembro (no ano atual, só até o mês corrente).
+      const lastMonth = yearParam === currentYear ? currentMonth : 12;
+      for (let m = 1; m <= lastMonth; m++) {
+        months.push({ year: yearParam, month: m });
       }
+    } else {
+      // Fallback legado: últimos N meses.
+      const monthsCount = Math.min(Math.max(parseInt(req.query.months, 10) || 12, 2), 24);
+      let year = currentYear;
+      let month = currentMonth;
+      for (let i = 0; i < monthsCount; i++) {
+        months.push({ year, month });
+        month -= 1;
+        if (month === 0) {
+          month = 12;
+          year -= 1;
+        }
+      }
+      months.sort((a, b) => a.year - b.year || a.month - b.month);
     }
 
     const data = [];

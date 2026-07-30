@@ -230,12 +230,25 @@ async function getDailyHome(req, res, next) {
     });
 
     // Upsells: cache do dia ou heurística rápida (sem LLM).
+    // Eventos sem item no cache são recalculados (ex.: match "contém" no catálogo).
     let appointmentUpsells = upsellsCache?.payload?.items || [];
     if (!upsellsCache?.payload) {
       appointmentUpsells = await buildAppointmentUpsells(req.userId, todayEvents, {
         skipCache: true,
         useAi: false,
       }).catch(() => []);
+    } else {
+      const covered = new Set(appointmentUpsells.map((item) => item.eventId));
+      const missingEvents = todayEvents.filter((event) => !covered.has(event.id));
+      if (missingEvents.length) {
+        const extra = await buildAppointmentUpsells(req.userId, missingEvents, {
+          skipCache: true,
+          useAi: false,
+        }).catch(() => []);
+        if (extra.length) {
+          appointmentUpsells = [...appointmentUpsells, ...extra];
+        }
+      }
     }
 
     const upsellByEvent = new Map(

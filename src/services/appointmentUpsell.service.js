@@ -34,19 +34,33 @@ function titleSegments(event) {
 
 function matchScore(candidateName, hint) {
   const name = normalize(candidateName);
-  if (name.length < 3 || hint.length < 3) return 0;
-  if (name === hint) return hint.length + 100;
-  if (name.includes(hint) || hint.includes(name)) {
-    return Math.min(name.length, hint.length) + 50;
+  const h = normalize(hint);
+  if (name.length < 3 || h.length < 3) return 0;
+
+  // Igualdade exata (já em minúsculas via normalize).
+  if (name === h) return h.length + 100;
+
+  // Contém: "design" casa com "Design de sobrancelhas", e vale para qualquer procedimento.
+  if (name.includes(h) || h.includes(name)) {
+    return Math.min(name.length, h.length) + 50;
   }
-  // Abreviações: "micro" deve casar com "Micropigmentação",
-  // "design" com "Design de sobrancelhas" etc.
-  const nameWords = name.split(' ');
-  const hintWords = hint.split(' ');
+
+  // Contém por palavra do catálogo (ex.: hint "design" vs nome "Novo Design Premium").
+  const nameWords = name.split(' ').filter(Boolean);
+  for (const nw of nameWords) {
+    if (nw.length < 3) continue;
+    if (nw === h) return h.length + 80;
+    if (nw.includes(h) || h.includes(nw)) {
+      return Math.min(nw.length, h.length) + 40;
+    }
+  }
+
+  // Abreviações por prefixo: "micro" → "micropigmentacao", "lab" → "labial".
+  const hintWords = h.split(' ').filter(Boolean);
   const prefixHit = hintWords.some((hw) =>
-    hw.length >= 4 && nameWords.some((nw) => nw.startsWith(hw) || hw.startsWith(nw))
+    hw.length >= 3 && nameWords.some((nw) => nw.startsWith(hw) || hw.startsWith(nw))
   );
-  return prefixHit ? Math.min(name.length, hint.length) : 0;
+  return prefixHit ? Math.min(name.length, h.length) + 20 : 0;
 }
 
 function bestMatch(candidates, getName, hints) {
@@ -64,9 +78,44 @@ function bestMatch(candidates, getName, hints) {
   return best;
 }
 
+/** Pistas do título/descrição para localizar o procedimento no catálogo (sempre normalizadas). */
+function procedureHintsFromEvent(event) {
+  const segments = titleSegments(event);
+  const hints = [];
+
+  const pushHint = (hint) => {
+    if (!hint) return;
+    hints.push(hint);
+    for (const word of hint.split(' ')) {
+      if (word.length >= 3) hints.push(word);
+    }
+  };
+
+  if (segments.length > 1) {
+    // Padrão agenda: "cliente/procedimento" → só o que vem depois da "/".
+    for (const hint of segments.slice(1)) pushHint(hint);
+  } else {
+    // Sem "/": usa o título e as palavras do texto do evento.
+    for (const hint of segments) pushHint(hint);
+    for (const word of eventText(event).split(' ')) {
+      if (word.length >= 3) hints.push(word);
+    }
+  }
+
+  // Descrição também pode citar o procedimento (em minúsculas via normalize).
+  for (const word of normalize(event.description || '').split(' ')) {
+    if (word.length >= 3) hints.push(word);
+  }
+
+  return [...new Set(hints.filter(Boolean))];
+}
+
 function findMentionedProcedure(event, procedures) {
+  if (!procedures.length) return null;
+
   const text = eventText(event);
 
+  // 1) Nome completo do procedimento contido no texto do evento.
   const exact = [...procedures]
     .filter((procedure) => {
       const name = normalize(procedure.name);
@@ -75,9 +124,9 @@ function findMentionedProcedure(event, procedures) {
     .sort((a, b) => normalize(b.name).length - normalize(a.name).length)[0];
   if (exact) return exact;
 
-  // Sem match exato: usa os segmentos do título (procedimento vem após a "/").
-  const segments = titleSegments(event);
-  const hints = segments.length > 1 ? segments.slice(1) : segments;
+  // 2) Consulta "contém": cada pista (ex. "design") vs todos os procedimentos do catálogo.
+  const hints = procedureHintsFromEvent(event);
+  if (!hints.length) return null;
   return bestMatch(procedures, (p) => p.name, hints);
 }
 
