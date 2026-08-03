@@ -6,6 +6,7 @@ const {
   isSubscriptionEligibleForQuotaRenewal,
 } = require('./subscriptionAccess');
 const { isSubscriptionBypassUser } = require('./subscriptionBypass');
+const { resolvePlanTierFromPriceId } = require('./planEntitlements');
 
 const PARTNER_LOCK_MSG = 'Período de teste encerrado. Contrate um plano em Configurações para continuar.';
 
@@ -181,6 +182,8 @@ async function syncUserQuotaFromStripeSubscription(userId, subscription) {
 
   const periodKey = getCurrentQuotaPeriodKey();
 
+  const planTier = resolvePlanTierFromPriceId(priceId) || '';
+
   await User.findByIdAndUpdate(userId, {
     $set: {
       simulationMonthlyQuota: quota,
@@ -189,6 +192,7 @@ async function syncUserQuotaFromStripeSubscription(userId, subscription) {
       previewMonthlyQuota: previewQuota,
       previewCreditsRemaining: previewQuota,
       previewQuotaPeriodKey: periodKey,
+      ...(planTier ? { planTier } : {}),
     },
   });
 }

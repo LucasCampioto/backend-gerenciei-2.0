@@ -35,12 +35,7 @@ async function handleOAuthCallback(req, res, next) {
   // Definir URL do front-end uma única vez (porta 8080 como padrão)
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
   
-  console.log('🔔 [OAUTH CALLBACK] Recebido:', {
-    method: req.method,
-    url: req.url,
-    query: req.query,
-    frontendUrl
-  });
+  console.log('OAuth callback received');
   
   try {
     const { code, state, error: oauthError } = req.query;

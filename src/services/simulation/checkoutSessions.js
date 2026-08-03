@@ -102,6 +102,9 @@ async function createSubscriptionCheckoutSession({
     line_items: [{ price: String(priceId).trim(), quantity: 1 }],
     metadata,
     subscription_data: subscriptionData,
+    branding_settings: {
+      display_name: 'Gerenciei',
+    },
   };
   if (customerId) {
     baseParams.customer = customerId;

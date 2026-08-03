@@ -40,6 +40,8 @@ MONGODB_URI=mongodb://localhost:27017/signly
 # JWT
 JWT_SECRET=seu-jwt-secret-aqui
 JWT_EXPIRES_IN=7d
+# Opcional: secret dedicado para assinar o state do Google OAuth (fallback: JWT_SECRET)
+# OAUTH_STATE_SECRET=seu-oauth-state-secret
 
 # Server
 PORT=3000
@@ -93,20 +95,25 @@ SUBSCRIPTION_BYPASS_PREVIEW_MONTHLY_QUOTA=20
 
 Rotas: `POST /api/stripe/webhook` (raw body), `GET|POST /api/subscriptions/*`.
 
-## Cotas de simulação / preview
+## Cotas de simulação / preview + plan tier
 
-Planos LUNI (landing):
-- **Starter:** 40 simulações + 20 pré-visualizações/mês
-- **Pro:** 100 simulações + 50 pré-visualizações/mês
+Planos Gerenciei:
+- **Gestão:** 0 simulações + 0 pré-visualizações/mês (só ops)
+- **Profissional:** 60 simulações + 20 pré-visualizações/mês
+- **Legado (Starter LUNI):** 40 + 20 — assinantes existentes mantêm acesso completo
+- **Enterprise:** sob consulta / custom
 
 ```env
 # JSON por Stripe Price ID
-SIMULATION_QUOTA_BY_PRICE_ID={"price_xxx":40,"price_yyy":100}
-PREVIEW_QUOTA_BY_PRICE_ID={"price_xxx":20,"price_yyy":50}
+SIMULATION_QUOTA_BY_PRICE_ID={"price_xxx":40,"price_yyy":60}
+PREVIEW_QUOTA_BY_PRICE_ID={"price_xxx":20,"price_yyy":20}
+PLAN_TIER_BY_PRICE_ID={"price_xxx":"legado","price_yyy":"profissional","price_zzz":"gestao"}
 
 # Timezone da virada mensal civil (padrão America/Sao_Paulo)
 SIMULATION_QUOTA_TIMEZONE=America/Sao_Paulo
 ```
+
+`planTier` é persistido no User no webhook (`syncUserQuotaFromStripeSubscription`) e exposto em `GET /api/subscriptions/current`. Middleware `createPlanEntitlementsGuard` bloqueia rotas Pro-only (`ai_simulation`, `whatsapp`, `marketing`, `crm`, `commercial_ai`, `forms`) para o plano Gestão.
 
 Renovação mensal: contas `official` com `subscriptionStatus === active` e `stripeSubscriptionId`; ou IDs em `SUBSCRIPTION_BYPASS_USER_IDS`. Disparada no login/`GET /api/auth/me` e ao debitar créditos.
 
@@ -160,6 +167,40 @@ GEMINI_INPUT_USD_PER_1M=0.10
 GEMINI_IMAGE_OUTPUT_USD_PER_1M=30
 USD_TO_BRL=5.5
 ```
+
+## WhatsApp (WAME) — confirmação de agenda
+
+```env
+# Base URL da WAME API (default abaixo)
+WAME_SERVER=https://us.api-wa.me
+# Legado / migração: use `node scripts/migrate-wame-instance-keys.js` para
+# copiar esta chave para WhatsAppSettings.wameInstanceKey de cada clínica.
+# Em runtime cada clínica usa a própria chave (PUT /api/whatsapp/instance-key).
+WAME_INSTANCE_KEY=sua-instance-key
+# Segredo do cron de lembretes (header X-Cron-Secret)
+WHATSAPP_CRON_SECRET=troque-por-um-segredo-longo
+# Só para teste local: liga um setInterval no processo Node
+WHATSAPP_LOCAL_CRON=1
+WHATSAPP_LOCAL_CRON_INTERVAL_MS=60000
+```
+
+**Cron local (dev):** com `WHATSAPP_LOCAL_CRON=1`, o `index.js` consulta a agenda a cada N ms (default 60s) e também processa a **outbox** (boas-vindas, convite de simulação, campanhas aprovadas). **Não habilite isso na Vercel** (serverless).
+
+Automações relacionadas:
+- Confirmação de agenda (todo dia às 8:30, horários do dia)
+- Não compareceu (marca na Agenda; no dia seguinte pede remarcação)
+- Boas-vindas por tipo de funil (quiz/ebook/form…)
+- Convite de simulação (lead marcado como quente na qualificação)
+- Campanhas diárias com aprovação na Home / `/whatsapp/automacoes/campanhas-dia`
+
+**Cron (produção):** o backend na Vercel é serverless — configure um cron externo (ex.: cron-job.org) a cada **5 min** no endpoint:
+
+```http
+POST https://SEU-BACKEND/api/internal/whatsapp/process-reminders
+X-Cron-Secret: <WHATSAPP_CRON_SECRET>
+```
+
+A **confirmação de agenda** só envia a partir das **8:30 BRT**, em lote dos eventos do dia (dedupe por evento). O mesmo cron continua processando outbox (funil, campanhas, no-show) a qualquer hora.
 
 ## Proxy / Vercel
 

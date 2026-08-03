@@ -212,6 +212,15 @@ async function submitPublicResponse(req, res, next) {
         runDailyAiAnalyses,
       } = require('../services/commercialIntelligence.service');
       const aiDailyCache = require('../services/aiDailyCache.service');
+      const { enqueueFunnelWelcome } = require('../services/whatsappFunnel.service');
+
+      enqueueFunnelWelcome(form.userId, client._id, {
+        funnelType: form.templateKey || 'form',
+        campaignTitle: form.title || 'Formulário',
+        sourceRef: `formResponse:${response._id}`,
+        dedupeKey: `funnel:formResponse:${response._id}`,
+      }).catch(() => {});
+
       qualifyClient(form.userId.toString(), client._id.toString(), { force: true, advanceStage: false })
         .then(async () => {
           await buildClosingQueue(form.userId.toString(), { refresh: true, runAiRank: false });

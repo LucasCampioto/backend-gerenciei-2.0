@@ -1,14 +1,19 @@
 const express = require('express');
 const router = express.Router();
 const { getCalendarEvents, getCalendars } = require('../controllers/calendar.controller');
-const { 
-  initiateOAuth, 
-  handleOAuthCallback, 
-  disconnectCalendar, 
+const {
+  initiateOAuth,
+  handleOAuthCallback,
+  disconnectCalendar,
   getConnectionStatus,
   setPreferredCalendar,
   syncFamilyCalendar,
 } = require('../controllers/calendarOAuth.controller');
+const {
+  markNoShow,
+  unmarkNoShow,
+  listNoShows,
+} = require('../controllers/calendarNoShow.controller');
 const { authenticate } = require('../middleware/auth.middleware');
 
 // Rotas OAuth (callback não precisa de autenticação, mas valida state)
@@ -30,8 +35,10 @@ router.get('/calendars', getCalendars);
 // Rota para buscar eventos/agendamentos
 router.get('/events', getCalendarEvents);
 
+// No-show (não compareceu)
+router.get('/no-shows', listNoShows);
+router.post('/events/:eventId/no-show', markNoShow);
+router.delete('/events/:eventId/no-show', unmarkNoShow);
+router.post('/no-show', markNoShow);
+
 module.exports = router;
-
-
-
-

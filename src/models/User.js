@@ -104,6 +104,12 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  /** gestao | profissional | enterprise | legado — sincronizado no webhook Stripe */
+  planTier: {
+    type: String,
+    default: '',
+    trim: true,
+  },
   simulationMonthlyQuota: {
     type: Number,
     default: 0,

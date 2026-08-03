@@ -36,6 +36,7 @@ function userToPublic(doc) {
   if (doc.patientDataResponsibilityAckAt) {
     out.patientDataResponsibilityAckAt = doc.patientDataResponsibilityAckAt.toISOString();
   }
+  if (doc.planTier) out.planTier = String(doc.planTier);
   return out;
 }
 

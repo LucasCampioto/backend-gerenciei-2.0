@@ -105,6 +105,10 @@ async function generateContentCalendar(payload) {
   return callAgno('/commercial/content-calendar', payload, { timeoutMs: 30000 });
 }
 
+async function planWhatsAppCampaigns(payload) {
+  return callAgno('/commercial/whatsapp-campaigns', payload, { timeoutMs: 45000 });
+}
+
 async function healthCheck() {
   const base = getAgnoBaseUrl();
   const controller = new AbortController();
@@ -143,5 +147,6 @@ module.exports = {
   generateMagnetCampaign,
   personalizeDiagnosisLaudo,
   generateContentCalendar,
+  planWhatsAppCampaigns,
   healthCheck,
 };

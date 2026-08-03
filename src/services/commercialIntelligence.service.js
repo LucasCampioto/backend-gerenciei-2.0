@@ -396,6 +396,13 @@ async function qualifyClient(userId, clientId, { force = false, advanceStage = t
       type: 'qualification',
       content: `Score ${result.score} · ${temperature}: ${result.summary || result.nextStep || 'Qualificado'}`,
     });
+
+    if (temperature === 'quente') {
+      const sim = require('./whatsappSimulation.service');
+      sim.enqueueSimulationInvite(userId, client._id).catch((error) => {
+        console.warn('[commercialIntelligence] simulation invite:', error.message);
+      });
+    }
   }
 
   const current = getCurrentNode(client.journeyPlan);
@@ -1266,6 +1273,24 @@ async function runDailyAiAnalyses(userId, {
       source: 'rule',
       promptVersion: agno.PROMPT_VERSION,
     });
+  }
+
+  const waCampaignsClaim = await aiDailyCache.claimOrGet(userId, 'wa_campaigns');
+  if (waCampaignsClaim.shouldCompute) {
+    jobs.push(
+      (async () => {
+        const campaignService = require('./whatsappCampaign.service');
+        const result = await campaignService.generateDailyCampaigns(userId);
+        await aiDailyCache.saveDaily(userId, 'wa_campaigns', {
+          payload: result,
+          source: 'agent',
+          promptVersion: agno.PROMPT_VERSION,
+        });
+      })().catch((err) => {
+        console.warn('[dailyAi] wa_campaigns failed:', err.message);
+        return aiDailyCache.clearLease(userId, 'wa_campaigns');
+      })
+    );
   }
 
   await Promise.all(jobs);

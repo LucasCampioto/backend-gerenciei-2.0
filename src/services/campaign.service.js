@@ -2574,6 +2574,17 @@ async function submitPublicCampaignLead(slug, {
     } catch {
       /* ignore */
     }
+    try {
+      const { enqueueFunnelWelcome } = require('./whatsappFunnel.service');
+      enqueueFunnelWelcome(campaign.userId, client._id, {
+        funnelType: leadMagnetType || campaign.leadMagnetType || 'ebook',
+        campaignTitle: campaign.title || campaign.name || 'Campanha',
+        sourceRef: `campaignLead:${campaignLeadId}`,
+        dedupeKey: `funnel:campaignLead:${campaignLeadId}`,
+      }).catch(() => {});
+    } catch {
+      /* ignore */
+    }
   });
 
   const pdfUrl = await resolveCampaignPdfUrl(campaign);

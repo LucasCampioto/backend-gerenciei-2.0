@@ -1,6 +1,11 @@
 const { getStripe } = require('./stripeClient');
 const { updateUserStripeFields } = require('./usersBilling');
 const { stripeSubscriptionFields } = require('./stripeSubscriptionFields');
+const {
+  resolvePlanTier,
+  resolvePlanTierFromPriceId,
+} = require('./planEntitlements');
+const User = require('../../models/User');
 
 function isoOrNull(epochSeconds) {
   if (!epochSeconds) return null;
@@ -37,6 +42,7 @@ async function getCurrentSubscriptionSummary(user) {
       cancelAtPeriodEnd: false,
       currentPeriodEnd: null,
       currentPrice: null,
+      planTier: resolvePlanTier(user),
     };
   }
 
@@ -48,6 +54,14 @@ async function getCurrentSubscriptionSummary(user) {
   await updateUserStripeFields(user._id, stripeSubscriptionFields(subscription));
 
   const firstItem = subscription.items?.data?.[0];
+  const currentPrice = mapPrice(firstItem?.price);
+  const priceId = currentPrice?.id || '';
+  const planTier = resolvePlanTier(user, priceId);
+  const mappedFromPrice = resolvePlanTierFromPriceId(priceId);
+  if (mappedFromPrice && String(user.planTier || '') !== mappedFromPrice) {
+    await User.findByIdAndUpdate(user._id, { $set: { planTier: mappedFromPrice } });
+  }
+
   return {
     hasSubscription: true,
     status: subscription.status,
@@ -57,7 +71,8 @@ async function getCurrentSubscriptionSummary(user) {
     cancelAtPeriodEnd: subscription.cancel_at_period_end === true,
     currentPeriodEnd: isoOrNull(subscription.current_period_end),
     canceledAt: isoOrNull(subscription.canceled_at),
-    currentPrice: mapPrice(firstItem?.price),
+    currentPrice,
+    planTier,
   };
 }
 

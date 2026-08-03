@@ -319,6 +319,28 @@ async function getDailyHome(req, res, next) {
       );
     }
 
+    const campaignService = require('../services/whatsappCampaign.service');
+    let whatsappCampaigns = { dateKey: todayKey, pendingCount: 0, items: [] };
+    try {
+      // Sempre via IA; troca pending legado (rule_fallback) por campanhas do Agno.
+      whatsappCampaigns = await campaignService.ensureAgentDailyCampaigns(req.userId);
+      if (whatsappCampaigns.pendingCount) {
+        await aiDailyCache
+          .saveDaily(req.userId, 'wa_campaigns', {
+            payload: {
+              dateKey: whatsappCampaigns.dateKey,
+              count: whatsappCampaigns.pendingCount,
+              source: 'agent',
+            },
+            source: 'agent',
+            promptVersion: 'commercial-v1',
+          })
+          .catch(() => {});
+      }
+    } catch (err) {
+      console.warn('[home] whatsapp campaigns:', err.message);
+    }
+
     res.json({
       success: true,
       data: {
@@ -343,6 +365,7 @@ async function getDailyHome(req, res, next) {
           count: closingQueue.count,
           totalExpectedValue: visibleClosingTotal,
         },
+        whatsappCampaigns,
         director,
         briefing: {
           date: todayKey,
@@ -357,14 +380,18 @@ async function getDailyHome(req, res, next) {
           closingRank: Boolean(closingRankCache?.payload),
           director: Boolean(directorCache?.payload),
           upsells: Boolean(upsellsCache?.payload),
+          waCampaigns: Boolean((await aiDailyCache.getDaily(req.userId, 'wa_campaigns').catch(() => null))?.payload)
+            || whatsappCampaigns.pendingCount > 0,
         },
       },
     });
 
     // Primeira abertura do dia: dispara análises de IA em background.
+    const waCampaignsCache = await aiDailyCache.getDaily(req.userId, 'wa_campaigns').catch(() => null);
     const needsDailyAi = !closingRankCache?.payload
       || !directorCache?.payload
-      || !upsellsCache?.payload;
+      || !upsellsCache?.payload
+      || !waCampaignsCache?.payload;
     if (needsDailyAi) {
       setImmediate(() => {
         runDailyAiAnalyses(req.userId, {

@@ -17,6 +17,10 @@ const clientSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
+  whatsappOptOut: {
+    type: Boolean,
+    default: false,
+  },
   category: {
     type: String,
     enum: ['lead', 'cliente'],

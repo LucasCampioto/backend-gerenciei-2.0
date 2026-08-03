@@ -1,6 +1,7 @@
 require('dotenv').config();
 const app = require('./src/app');
 const { connectDatabase } = require('./src/config/database');
+const { startWhatsAppRemindersCron } = require('./src/jobs/whatsappReminders.cron');
 
 const PORT = process.env.PORT || 3000;
 
@@ -13,6 +14,7 @@ async function startServer() {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📍 API available at http://localhost:${PORT}/api`);
       console.log(`🔍 Health check: http://localhost:${PORT}/health`);
+      startWhatsAppRemindersCron();
     });
   } catch (error) {
     console.error('Failed to start server:', error);

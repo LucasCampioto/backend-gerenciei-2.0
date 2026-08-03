@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-const KINDS = ['closing_rank', 'director', 'upsells'];
+const KINDS = ['closing_rank', 'director', 'upsells', 'wa_campaigns'];
 
 const aiDailyCacheSchema = new mongoose.Schema({
   userId: {

@@ -47,7 +47,7 @@ async function getAllClients(req, res, next) {
       query.category = category;
     }
 
-    const clients = await Client.find(query).sort({ createdAt: -1 });
+    const clients = await Client.find(query).sort({ name: 1 });
 
     res.json({
       success: true,

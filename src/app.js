@@ -24,24 +24,17 @@ app.use((req, res, next) => {
       });
       if (Object.keys(parsedQuery).length > 0 || !req.query || Object.keys(req.query).length === 0) {
         req.query = parsedQuery;
-        console.log('📋 [EXPRESS] Query params parseados manualmente:', req.query);
       }
     } catch (error) {
-      console.warn('⚠️ [EXPRESS] Erro ao parsear query params:', error.message);
+      console.warn('Failed to parse query params:', error.message);
     }
   }
   next();
 });
 
 app.use((req, res, next) => {
-  console.log('🔍 [EXPRESS] Request:', {
-    method: req.method,
-    url: req.url,
-    path: req.path,
-    originalUrl: req.originalUrl,
-    baseUrl: req.baseUrl,
-    query: req.query
-  });
+  // Never log headers (Authorization / cookies) or full query (OAuth codes).
+  console.log(`${req.method} ${req.path || req.url?.split('?')[0] || ''}`);
   next();
 });
 
@@ -62,12 +55,14 @@ app.use(express.urlencoded({ extended: true }));
 const JWT_SECRET = process.env.JWT_SECRET;
 const { createBillingLockGuard } = require('./middleware/billingLock.middleware');
 const { createTermsAcceptanceGuard } = require('./middleware/termsAcceptance.middleware');
+const { createPlanEntitlementsGuard } = require('./middleware/planEntitlements.middleware');
 
 if (JWT_SECRET) {
   app.use(createBillingLockGuard(JWT_SECRET));
   app.use(createTermsAcceptanceGuard(JWT_SECRET));
+  app.use(createPlanEntitlementsGuard(JWT_SECRET));
 } else {
-  console.warn('⚠️ JWT_SECRET ausente — billing/terms guards não aplicados');
+  console.warn('⚠️ JWT_SECRET ausente — billing/terms/plan guards não aplicados');
 }
 
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
@@ -86,6 +81,7 @@ const employeeRoutes = require('./routes/employee.routes');
 const clientRoutes = require('./routes/client.routes');
 const saleRoutes = require('./routes/sale.routes');
 const expenseRoutes = require('./routes/expense.routes');
+const stockItemRoutes = require('./routes/stockItem.routes');
 const documentRoutes = require('./routes/document.routes');
 const calendarRoutes = require('./routes/calendar.routes');
 const reportsRoutes = require('./routes/reports.routes');
@@ -97,6 +93,8 @@ const homeRoutes = require('./routes/home.routes');
 const onboardingRoutes = require('./routes/onboarding.routes');
 const commercialRoutes = require('./routes/commercial.routes');
 const internalRoutes = require('./routes/internal.routes');
+const whatsappRoutes = require('./routes/whatsapp.routes');
+const whatsappCronRoutes = require('./routes/whatsappCron.routes');
 const subscriptionRoutes = require('./routes/subscription.routes');
 const adminSimulationRoutes = require('./routes/adminSimulation.routes');
 const enhanceRoutes = require('./routes/enhance.routes');
@@ -111,6 +109,7 @@ app.use('/api/employees', employeeRoutes);
 app.use('/api/clients', clientRoutes);
 app.use('/api/sales', saleRoutes);
 app.use('/api/expenses', expenseRoutes);
+app.use('/api/stock-items', stockItemRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/reports', reportsRoutes);
@@ -125,6 +124,8 @@ app.use('/api/home', homeRoutes);
 app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/commercial', commercialRoutes);
 app.use('/api/internal', internalRoutes);
+app.use('/api/internal/whatsapp', whatsappCronRoutes);
+app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/admin', adminSimulationRoutes);
 app.use('/api', enhancePairsRoutes);

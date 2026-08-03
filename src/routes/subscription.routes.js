@@ -15,6 +15,8 @@ const {
 const { provisionUserFromCheckoutSession } = require('../services/simulation/subscriptionWebhook');
 const { authenticate } = require('../middleware/auth.middleware');
 const { isSubscriptionBypassUser } = require('../services/simulation/subscriptionBypass');
+const { resolvePlanTier } = require('../services/simulation/planEntitlements');
+const User = require('../models/User');
 
 function localSubscriptionSummary(user) {
   const subscriptionId = String(user.stripeSubscriptionId || '').trim();
@@ -28,10 +30,11 @@ function localSubscriptionSummary(user) {
     cancelAtPeriodEnd: user.cancelAtPeriodEnd === true,
     currentPeriodEnd: user.currentPeriodEnd ? user.currentPeriodEnd.toISOString() : null,
     currentPrice: null,
+    planTier: resolvePlanTier(user),
   };
 }
 
-function bypassSubscriptionSummary() {
+function bypassSubscriptionSummary(user) {
   return {
     hasSubscription: true,
     status: 'active',
@@ -51,6 +54,7 @@ function bypassSubscriptionSummary() {
       productName: 'Conta administrador (sem cobrança)',
     },
     billingBypass: true,
+    planTier: resolvePlanTier(user),
   };
 }
 
@@ -357,7 +361,7 @@ router.get('/current', authenticate, async (req, res) => {
 
     // Contas admin (SUBSCRIPTION_BYPASS_USER_IDS): isentas de Stripe/assinatura.
     if (isSubscriptionBypassUser(user)) {
-      res.json(bypassSubscriptionSummary());
+      res.json(bypassSubscriptionSummary(user));
       return;
     }
 
@@ -418,6 +422,43 @@ router.post('/portal', authenticate, async (req, res) => {
       return;
     }
     res.status(500).json({ message: 'Erro ao abrir portal de assinatura' });
+  }
+});
+
+/** Admin-only: simula plano (gestao/profissional/…) sem Stripe. */
+router.put('/simulate-plan-tier', authenticate, async (req, res) => {
+  try {
+    const user = await findUserById(req.userId);
+    if (!user) {
+      res.status(404).json({ message: 'Usuário não encontrado' });
+      return;
+    }
+    if (!isSubscriptionBypassUser(user)) {
+      res.status(403).json({ message: 'Apenas conta administrador pode simular plano.' });
+      return;
+    }
+
+    const allowed = new Set(['gestao', 'profissional', 'enterprise', 'legado']);
+    const tier = String(req.body?.planTier || '')
+      .trim()
+      .toLowerCase();
+    if (!allowed.has(tier)) {
+      res.status(400).json({
+        message: 'planTier inválido. Use: gestao, profissional, enterprise ou legado.',
+      });
+      return;
+    }
+
+    await User.findByIdAndUpdate(user._id, { $set: { planTier: tier } });
+    const updated = await findUserById(req.userId);
+    res.json({
+      success: true,
+      planTier: tier,
+      subscription: bypassSubscriptionSummary(updated),
+    });
+  } catch (e) {
+    console.error('[simulate-plan-tier]', e?.message ?? e);
+    res.status(500).json({ message: 'Erro ao simular plano' });
   }
 });
 
