@@ -123,8 +123,9 @@ app.use('/api/marketing', require('./routes/marketing.routes'));
 app.use('/api/home', homeRoutes);
 app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/commercial', commercialRoutes);
-app.use('/api/internal', internalRoutes);
+// WhatsApp cron antes de /api/internal — senão authenticateService (X-Service-Key) engole o path.
 app.use('/api/internal/whatsapp', whatsappCronRoutes);
+app.use('/api/internal', internalRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/admin', adminSimulationRoutes);
