@@ -78,7 +78,43 @@ async function reminderLogs(req, res) {
 async function processRemindersCron(req, res) {
   try {
     const data = await whatsappService.processReminders();
-    return res.json({ success: true, data });
+    const results = Array.isArray(data?.results) ? data.results : [];
+    // Resposta agregada para o cron externo — sem userId / detalhes por clínica.
+    const summary = {
+      skipped: Boolean(data?.skipped),
+      ...(data?.reason ? { reason: data.reason } : {}),
+      processedUsers: data?.processedUsers ?? results.length,
+      sent: results.reduce((n, r) => n + (Number(r.sent) || 0), 0),
+      failed: results.reduce(
+        (n, r) => n + (Number(r.failed) || 0) + (r.error ? 1 : 0),
+        0
+      ),
+      outbox: data?.outbox
+        ? {
+            processed: data.outbox.processed ?? 0,
+            sent: data.outbox.sent ?? 0,
+            failed: data.outbox.failed ?? 0,
+            skipped: data.outbox.skipped ?? 0,
+            ...(data.outbox.error ? { error: true } : {}),
+          }
+        : undefined,
+      simulationSweep: data?.simulationSweep
+        ? {
+            queued: data.simulationSweep.queued ?? 0,
+            skipped: data.simulationSweep.skipped ?? 0,
+            ...(data.simulationSweep.error ? { error: true } : {}),
+          }
+        : undefined,
+      noShowFollowUp: data?.noShowFollowUp
+        ? {
+            processed: data.noShowFollowUp.processed ?? 0,
+            queued: data.noShowFollowUp.queued ?? 0,
+            skipped: data.noShowFollowUp.skipped ?? 0,
+            ...(data.noShowFollowUp.error ? { error: true } : {}),
+          }
+        : undefined,
+    };
+    return res.json({ success: true, data: summary });
   } catch (error) {
     return httpError(res, error);
   }
