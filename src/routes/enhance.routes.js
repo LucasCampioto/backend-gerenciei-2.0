@@ -15,6 +15,7 @@ const {
 } = require('../services/simulation/simulationQuotas');
 const { resolveEnhanceRegioes } = require('../services/simulation/enhanceDefaultRegions');
 const { recordGenerationUsageAsync } = require('../services/simulation/aiUsageRecorder');
+const { stripInlineImagesIfR2 } = require('../services/simulation/enhanceResponse');
 const Client = require('../models/Client');
 const { clientHasPhotoConsent } = require('../services/simulation/clientPhotoConsent');
 const { authenticate } = require('../middleware/auth.middleware');
@@ -285,7 +286,7 @@ router.post('/v1/enhance', authenticate, async (req, res, next) => {
       if (simResult.pendingRecord) {
         recordGenerationUsageAsync(simResult.pendingRecord);
       }
-      res.json(out);
+      res.json(stripInlineImagesIfR2(out));
       return;
     }
 
@@ -329,7 +330,7 @@ router.post('/v1/enhance', authenticate, async (req, res, next) => {
       }
     }
 
-    res.json(out);
+    res.json(stripInlineImagesIfR2(out));
   } catch (e) {
     if (debited) {
       try {

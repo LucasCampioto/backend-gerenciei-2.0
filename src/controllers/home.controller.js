@@ -45,6 +45,19 @@ function clinicYesterday(date = new Date()) {
   return new Date(noonToday.getTime() - 24 * 60 * 60 * 1000);
 }
 
+/** Segunda 00:00 (Brasília) da semana civil que contém `date`. */
+function startOfWeekMonday(date = new Date()) {
+  const key = formatDateKeyInClinic(date);
+  const noon = new Date(`${key}T12:00:00.000${CLINIC_TZ_OFFSET}`);
+  const weekday = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Sao_Paulo',
+    weekday: 'short',
+  }).format(noon);
+  const offsetDays = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 }[weekday] ?? 0;
+  const mondayNoon = new Date(noon.getTime() - offsetDays * 24 * 60 * 60 * 1000);
+  return startOfDay(mondayNoon);
+}
+
 function formatBRL(value) {
   return Number(value || 0).toFixed(2).replace('.', ',');
 }
@@ -63,14 +76,17 @@ async function aggregateSalesForRange(userObjectId, start, end) {
         count: { $sum: 1 },
         netValue: { $sum: '$netValue' },
         totalValue: { $sum: '$totalValue' },
+        clientIds: { $addToSet: '$clientId' },
       },
     },
   ]);
 
+  const clientIds = (rows[0]?.clientIds || []).filter(Boolean);
   return {
     count: rows[0]?.count ?? 0,
     netValue: rows[0]?.netValue ?? 0,
     totalValue: rows[0]?.totalValue ?? 0,
+    clientsCount: clientIds.length,
   };
 }
 
@@ -176,8 +192,12 @@ async function getDailyHome(req, res, next) {
     const yDay = clinicYesterday();
     const yesterdayStart = startOfDay(yDay);
     const yesterdayEnd = endOfDay(yDay);
+    const weekStart = startOfWeekMonday();
+    const prevWeekEnd = new Date(weekStart.getTime() - 1);
+    const prevWeekStart = startOfWeekMonday(prevWeekEnd);
     const todayKey = formatDateKey();
     const yesterdayKey = formatDateKey(yDay);
+    const weekStartKey = formatDateKey(weekStart);
 
     const user = await User.findById(req.userId)
       .select('googleCalendarConnected googleCalendarId name')
@@ -189,6 +209,8 @@ async function getDailyHome(req, res, next) {
       ruleQueue,
       todaySales,
       yesterdaySales,
+      weekSales,
+      prevWeekSales,
       directorCache,
       upsellsCache,
       closingRankCache,
@@ -197,6 +219,8 @@ async function getDailyHome(req, res, next) {
       buildActionQueue(req.userId).catch(() => ({ items: [], dueReturnsCount: 0 })),
       aggregateSalesForRange(userObjectId, todayStart, todayEnd),
       aggregateSalesForRange(userObjectId, yesterdayStart, yesterdayEnd),
+      aggregateSalesForRange(userObjectId, weekStart, todayEnd),
+      aggregateSalesForRange(userObjectId, prevWeekStart, prevWeekEnd),
       aiDailyCache.getDaily(req.userId, 'director'),
       aiDailyCache.getDaily(req.userId, 'upsells'),
       aiDailyCache.getDaily(req.userId, 'closing_rank'),
@@ -367,6 +391,19 @@ async function getDailyHome(req, res, next) {
         },
         whatsappCampaigns,
         director,
+        weeklyBriefing: {
+          weekStart: weekStartKey,
+          weekEnd: todayKey,
+          netValue: weekSales.netValue,
+          salesCount: weekSales.count,
+          clientsCount: weekSales.clientsCount,
+          avgTicket:
+            weekSales.count > 0 ? weekSales.netValue / weekSales.count : 0,
+          vsPrevWeekNet:
+            Math.round((weekSales.netValue - prevWeekSales.netValue) * 100) / 100,
+          dueReturnsCount: ruleQueue.dueReturnsCount || 0,
+          closingQueueCount: closingQueue.count || 0,
+        },
         briefing: {
           date: todayKey,
           items: nextItems,

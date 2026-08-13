@@ -28,6 +28,8 @@ const pricingSnapshotSchema = new mongoose.Schema(
   {
     inputUsdPer1M: { type: Number, required: true },
     imageOutputUsdPer1M: { type: Number, required: true },
+    openaiInputUsdPer1M: { type: Number, default: null },
+    openaiOutputUsdPer1M: { type: Number, default: null },
     usdToBrl: { type: Number, default: null },
     modelId: { type: String, default: '' },
   },
@@ -42,7 +44,10 @@ const aiUsageEventSchema = new mongoose.Schema(
     accountType: { type: String, enum: ['official', 'partner_test'], default: 'official' },
     stripeSubscriptionId: { type: String, default: '' },
 
-    eventType: { type: String, enum: ['preview', 'simulation'], required: true },
+    eventType: { type: String, enum: ['preview', 'simulation', 'text'], required: true },
+    /** Feature de texto (reactivação, campanha, etc.) ou mirror do eventType para imagem */
+    feature: { type: String, default: '', index: true },
+    modality: { type: String, enum: ['image', 'text'], default: 'image' },
     outcome: { type: String, enum: ['success', 'failed'], required: true },
 
     clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client', default: null },

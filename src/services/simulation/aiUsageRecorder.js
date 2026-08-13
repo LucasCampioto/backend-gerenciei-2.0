@@ -138,6 +138,8 @@ async function recordGenerationUsage({
     stripeSubscriptionId: user.stripeSubscriptionId || '',
 
     eventType: eventType === 'preview' ? 'preview' : 'simulation',
+    feature: eventType === 'preview' ? 'preview' : 'simulation',
+    modality: 'image',
     outcome: outcome === 'success' ? 'success' : 'failed',
 
     clientId: clientObjectId,
@@ -171,6 +173,61 @@ async function recordGenerationUsage({
 }
 
 /**
+ * Grava uso de IA texto (Agno / GPT). Fire-and-forget.
+ */
+async function recordTextUsage({
+  userId,
+  feature,
+  outcome,
+  agentData,
+  latencyMs,
+}) {
+  const user = await User.findById(userId).lean();
+  if (!user) return;
+
+  const { attempts, successfulModelId } = parseUsageReport(agentData);
+  const totals = aggregateAttempts(attempts);
+  const { estimatedCostUsd, pricingSnapshot } = computeGenerationCostUsd(
+    attempts,
+    successfulModelId,
+  );
+
+  const featureKey = String(feature || 'unknown')
+    .trim()
+    .slice(0, 64)
+    .replace(/[^a-zA-Z0-9_-]/g, '_');
+
+  const doc = await AiUsageEvent.create({
+    userId,
+    userEmail: user.email || '',
+    userName: user.name || '',
+    accountType: user.accountType || 'official',
+    stripeSubscriptionId: user.stripeSubscriptionId || '',
+
+    eventType: 'text',
+    feature: featureKey || 'unknown',
+    modality: 'text',
+    outcome: outcome === 'success' ? 'success' : 'failed',
+
+    latencyMs: safeInt(latencyMs),
+    attempts,
+    ...totals,
+    estimatedCostUsd,
+    pricingSnapshot,
+  });
+
+  console.log('[aiUsage] texto gravado', {
+    id: String(doc._id),
+    userId: String(userId),
+    feature: featureKey,
+    outcome,
+    promptTokens: totals.promptTokens,
+    outputTokens: totals.outputTokens,
+    estimatedCostUsd,
+  });
+}
+
+/**
  * Não bloqueia a resposta HTTP do enhance.
  */
 function recordGenerationUsageAsync(payload) {
@@ -179,8 +236,16 @@ function recordGenerationUsageAsync(payload) {
   });
 }
 
+function recordTextUsageAsync(payload) {
+  void recordTextUsage(payload).catch((err) => {
+    console.error('[aiUsage] falha ao gravar texto', err?.message);
+  });
+}
+
 module.exports = {
   parseUsageReport,
   recordGenerationUsage,
   recordGenerationUsageAsync,
+  recordTextUsage,
+  recordTextUsageAsync,
 };

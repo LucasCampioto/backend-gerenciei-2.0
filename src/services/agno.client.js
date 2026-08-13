@@ -1,5 +1,24 @@
 const PROMPT_VERSION = 'commercial-v1';
 
+const FEATURE_BY_PATH = {
+  '/commercial/qualify': 'qualify',
+  '/commercial/offer': 'offer',
+  '/commercial/objection': 'objection',
+  '/commercial/conversation': 'conversation',
+  '/commercial/closing-queue': 'closing_queue',
+  '/commercial/director': 'director',
+  '/commercial/appointment-upsells': 'appointment_upsells',
+  '/commercial/prepare-lead': 'prepare_lead',
+  '/commercial/reactivation': 'reactivation',
+  '/commercial/campaign-themes': 'campaign_themes',
+  '/commercial/campaign': 'campaign',
+  '/commercial/campaign-quiz': 'campaign_quiz',
+  '/commercial/campaign-magnet': 'campaign_magnet',
+  '/commercial/diagnosis-personalize': 'diagnosis_personalize',
+  '/commercial/content-calendar': 'content_calendar',
+  '/commercial/whatsapp-campaigns': 'whatsapp_campaigns',
+};
+
 function getAgnoBaseUrl() {
   return (process.env.AGNO_BASE_URL || 'http://localhost:7777').replace(/\/$/, '');
 }
@@ -9,10 +28,36 @@ function isAgnoEnabled() {
   return Boolean(process.env.AGNO_BASE_URL);
 }
 
+function featureFromPath(path) {
+  if (FEATURE_BY_PATH[path]) return FEATURE_BY_PATH[path];
+  return String(path || '')
+    .replace(/^\/commercial\//, '')
+    .replace(/-/g, '_')
+    .slice(0, 64) || 'unknown';
+}
+
+function maybeRecordTextUsage(path, body, data, latencyMs) {
+  const userId = body?.userId;
+  if (!userId || !data) return;
+  try {
+    const { recordTextUsageAsync } = require('./simulation/aiUsageRecorder');
+    recordTextUsageAsync({
+      userId,
+      feature: featureFromPath(path),
+      outcome: data.success === false ? 'failed' : 'success',
+      agentData: data,
+      latencyMs,
+    });
+  } catch (err) {
+    console.error('[agno] falha ao enfileirar usage', err?.message);
+  }
+}
+
 async function callAgno(path, body, { timeoutMs = 6000 } = {}) {
   const base = getAgnoBaseUrl();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const started = Date.now();
 
   try {
     const response = await fetch(`${base}${path}`, {
@@ -33,7 +78,9 @@ async function callAgno(path, body, { timeoutMs = 6000 } = {}) {
       throw new Error(`Agno ${response.status}: ${text.slice(0, 200)}`);
     }
 
-    return await response.json();
+    const data = await response.json();
+    maybeRecordTextUsage(path, body, data, Date.now() - started);
+    return data;
   } finally {
     clearTimeout(timer);
   }

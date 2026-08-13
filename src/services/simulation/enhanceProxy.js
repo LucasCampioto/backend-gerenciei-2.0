@@ -1,8 +1,10 @@
 const axios = require('axios');
 const FormData = require('form-data');
 
+const ENHANCE_TIMEOUT_MS = Number(process.env.ENHANCE_AGENT_TIMEOUT_MS || 180000);
+
 /**
- * Encaminha o mesmo multipart ao agente.
+ * Encaminha o mesmo multipart ao agente (mesmo host que AGNO_BASE_URL).
  * @param {string} agentBaseUrl
  * @param {{ buffer: Buffer, filename: string, mime: string, tipos: string[], regioes: string, intensidade: string, intensidadePct?: number, practiceProfile?: string, detalhes?: string }} parts
  */
@@ -31,10 +33,15 @@ async function forwardEnhanceToAgent(agentBaseUrl, parts) {
   if (det.trim()) fd.append('detalhes', det.trim());
 
   const url = `${base}/v1/enhance?format=json`;
+  const headers = {
+    ...fd.getHeaders(),
+    'X-Service-Key': process.env.AGNO_SERVICE_KEY || '',
+  };
   const response = await axios.post(url, fd, {
-    headers: fd.getHeaders(),
+    headers,
     maxBodyLength: Infinity,
     maxContentLength: Infinity,
+    timeout: ENHANCE_TIMEOUT_MS,
     validateStatus: () => true,
   });
   return { data: response.data, status: response.status };

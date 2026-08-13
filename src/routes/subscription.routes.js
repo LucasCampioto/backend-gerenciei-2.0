@@ -62,7 +62,7 @@ function loginUrlDefault() {
   const explicit = (process.env.FRONTEND_LOGIN_URL || '').trim();
   if (explicit) return explicit;
   const origin = (process.env.CORS_ORIGIN || '').trim() || 'http://localhost:8080';
-  return `${origin.replace(/\/$/, '')}/login`;
+  return `${origin.replace(/\/$/, '')}/`;
 }
 
 const router = Router();

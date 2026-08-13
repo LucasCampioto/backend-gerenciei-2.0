@@ -57,7 +57,7 @@ FRONTEND_LOGIN_URL=http://localhost:8080/login
 ```env
 # URL do serviço agents-gerenciei. Se vazio, usa heurísticas locais (fallback).
 AGNO_BASE_URL=http://localhost:7777
-# Chave compartilhada Node <-> Agno (mesmo valor nos dois .env)
+# Chave compartilhada Node <-> Agno (mesmo valor nos dois .env). Também autenticar POST /v1/enhance.
 AGNO_SERVICE_KEY=troque-por-uma-chave-secreta
 # AGNO_ENABLED=false  # força desligar chamadas ao Agno
 ```
@@ -131,8 +131,11 @@ R2_SIGNED_URL_TTL_SECONDS=900
 
 ## Agente de enhance (IA)
 
+Mesmo host do `AGNO_BASE_URL` (agents-gerenciei). O Node envia `X-Service-Key` (`AGNO_SERVICE_KEY`).
+
 ```env
-ENHANCE_AGENT_BASE_URL=http://localhost:8000
+ENHANCE_AGENT_BASE_URL=http://localhost:7777
+# ENHANCE_AGENT_TIMEOUT_MS=180000
 ```
 
 Rotas: `POST /v1/enhance?format=json`, `POST /v1/enhance/finalize`, `GET /api/enhance-pairs/:pairId`.
@@ -144,6 +147,26 @@ ADMIN_API_KEY=string-longa-e-secreta
 ```
 
 Header: `x-admin-key: <ADMIN_API_KEY>`. Rotas em `/api/admin/*` (partner-users, usage/*).
+
+## Platform admin (gerenciei-admin)
+
+```env
+# CSV de e-mails com acesso ao painel interno (JWT + allowlist)
+ADMIN_EMAILS=l_campioto@hotmail.com
+# Instância WAME da Gerenciei (ops → clínicas), separada das clínicas
+WAME_PLATFORM_INSTANCE_KEY=sua-instance-key-plataforma
+# Gemini — botão "Gerar com IA" nas automações de digest (só reescreve texto; disparo é rule-based)
+GEMINI_API_KEY=
+# opcional; default gemini-2.0-flash
+GEMINI_TEXT_MODEL=gemini-2.0-flash
+```
+
+Rotas JWT em `/api/platform-admin/*` (overview, tenants, billing, usage, whatsapp, whatsapp/automations). Middleware `requirePlatformAdmin` após `authenticate`.
+
+Automações plataforma → clínicas (cron):
+- Resumo manhã 8:45 BRT, fim do dia 20:00 BRT e resumo da semana domingo 11:00 BRT
+- **Desligado em produção por padrão.** Só roda com `PLATFORM_DIGESTS_ENABLED=1` ou com `WHATSAPP_LOCAL_CRON=1` (dev).
+- Cron local (`WHATSAPP_LOCAL_CRON`) ou `POST /api/internal/whatsapp/process-platform-digests` + `X-Cron-Secret` (ainda respeita o flag acima)
 
 ## E-mail (Resend)
 
@@ -160,11 +183,14 @@ Versão vigente em código: `src/legal/version.js` (`LEGAL_VERSION`, ex. `2026-0
 
 Checkout e `POST /api/auth/accept-terms` exigem `termsVersion` igual a `LEGAL_VERSION`. Middleware `createTermsAcceptanceGuard` bloqueia rotas autenticadas até aceite de termos + privacidade + responsabilidade sobre dados de clientes/pacientes.
 
-## Custo de uso de IA (analytics admin)
+# Custo de uso de IA (analytics admin)
 
 ```env
 GEMINI_INPUT_USD_PER_1M=0.10
 GEMINI_IMAGE_OUTPUT_USD_PER_1M=30
+# Texto via Agno/GPT (tentativas transport=agno)
+OPENAI_INPUT_USD_PER_1M=0.15
+OPENAI_OUTPUT_USD_PER_1M=0.6
 USD_TO_BRL=5.5
 ```
 
@@ -200,6 +226,13 @@ POST https://SEU-BACKEND/api/internal/whatsapp/process-reminders
 X-Cron-Secret: <WHATSAPP_CRON_SECRET>
 ```
 
+Esse endpoint processa só lembretes/outbox das **clínicas**. Digests do **admin** (manhã / fim do dia / semana) ficam off até `PLATFORM_DIGESTS_ENABLED=1`; aí use também:
+
+```http
+POST https://SEU-BACKEND/api/internal/whatsapp/process-platform-digests
+X-Cron-Secret: <WHATSAPP_CRON_SECRET>
+```
+
 A **confirmação de agenda** só envia a partir das **8:30 BRT**, em lote dos eventos do dia (dedupe por evento). O mesmo cron continua processando outbox (funil, campanhas, no-show) a qualquer hora.
 
 ## Proxy / Vercel
@@ -212,7 +245,7 @@ A **confirmação de agenda** só envia a partir das **8:30 BRT**, em lote dos e
 
 Operação após deploy deste módulo (repos `luni-backend` / `luni-portal` deixam de ser usados):
 
-1. Configurar no `.env` da Gerenciei: Stripe, mapas de cota, `ENHANCE_AGENT_BASE_URL` (luni-agent), R2, Resend, `ADMIN_API_KEY`, `SUBSCRIPTION_BYPASS_USER_IDS` (donos / contas legadas).
+1. Configurar no `.env` da Gerenciei: Stripe, mapas de cota, `ENHANCE_AGENT_BASE_URL` (mesmo host de `AGNO_BASE_URL` / agents-gerenciei), R2, Resend, `ADMIN_API_KEY`, `SUBSCRIPTION_BYPASS_USER_IDS` (donos / contas legadas).
 2. Apontar webhook Stripe para `POST /api/stripe/webhook` da Gerenciei (não mais LUNI).
 3. Contas existentes da Gerenciei sem Stripe ficam bloqueadas (gate total) até bypass, partner_test ou checkout.
 4. Signup público permanece **403** — entrada via Stripe checkout ou `POST /api/admin/partner-users`.
