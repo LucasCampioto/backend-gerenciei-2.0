@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const KINDS = [
   'funnel_welcome',
@@ -97,6 +98,8 @@ whatsAppOutboxSchema.index(
   }
 );
 whatsAppOutboxSchema.index({ status: 1, scheduledAt: 1 });
+
+whatsAppOutboxSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('WhatsAppOutbox', whatsAppOutboxSchema);
 module.exports.KINDS = KINDS;

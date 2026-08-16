@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const expenseSchema = new mongoose.Schema({
   userId: {
@@ -27,6 +28,8 @@ const expenseSchema = new mongoose.Schema({
 });
 
 expenseSchema.index({ createdAt: 1 });
+
+expenseSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('Expense', expenseSchema);
 

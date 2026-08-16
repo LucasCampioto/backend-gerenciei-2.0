@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const additionalCostsSchema = new mongoose.Schema(
   {
@@ -33,5 +34,7 @@ const pricingBaseSchema = new mongoose.Schema(
 );
 
 pricingBaseSchema.index({ userId: 1, procedureId: 1 }, { unique: true });
+
+pricingBaseSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('PricingBase', pricingBaseSchema);

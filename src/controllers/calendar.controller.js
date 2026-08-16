@@ -1,3 +1,4 @@
+const { isOrgAdminRequest } = require('../utils/tenantScope');
 const { getEvents, getCalendarsList } = require('../services/googleCalendar.service');
 const User = require('../models/User');
 
@@ -204,9 +205,219 @@ async function getCalendars(req, res, next) {
   }
 }
 
+function parseRangeOptions(req) {
+  const { startDate, endDate, maxResults } = req.query;
+  const options = {
+    maxResults: maxResults ? parseInt(maxResults, 10) : 100,
+  };
+
+  if (startDate) {
+    const start = new Date(startDate);
+    if (isNaN(start.getTime())) {
+      const err = new Error('Data inicial inválida. Use formato ISO (ex: 2024-01-01T00:00:00Z)');
+      err.status = 400;
+      throw err;
+    }
+    options.timeMin = start.toISOString();
+  } else {
+    options.timeMin = new Date().toISOString();
+  }
+
+  if (endDate) {
+    const end = new Date(endDate);
+    if (isNaN(end.getTime())) {
+      const err = new Error('Data final inválida. Use formato ISO (ex: 2024-01-31T23:59:59Z)');
+      err.status = 400;
+      throw err;
+    }
+    options.timeMax = end.toISOString();
+  }
+
+  if (options.maxResults < 1 || options.maxResults > 2500) {
+    const err = new Error('maxResults deve ser entre 1 e 2500');
+    err.status = 400;
+    throw err;
+  }
+
+  return options;
+}
+
+/**
+ * Lista membros da org com status de Google Calendar (só admin/owner).
+ */
+async function getTeamCalendarMembers(req, res, next) {
+  try {
+    if (!isOrgAdminRequest(req)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Apenas administradores podem ver a agenda da equipe',
+      });
+    }
+
+    if (!req.orgId) {
+      const self = await User.findById(req.userId)
+        .select('name email googleCalendarConnected googleCalendarId role status')
+        .lean();
+      return res.json({
+        success: true,
+        data: [
+          {
+            id: String(self._id),
+            name: self.name,
+            email: self.email,
+            role: self.role || 'owner',
+            connected: Boolean(self.googleCalendarConnected),
+            calendarId: self.googleCalendarId || 'primary',
+          },
+        ],
+      });
+    }
+
+    const members = await User.find({
+      organizationId: req.orgId,
+      status: { $ne: 'disabled' },
+    })
+      .select('name email googleCalendarConnected googleCalendarId role status')
+      .sort({ role: 1, name: 1 })
+      .lean();
+
+    return res.json({
+      success: true,
+      data: members.map((m) => ({
+        id: String(m._id),
+        name: m.name,
+        email: m.email,
+        role: m.role || 'member',
+        connected: Boolean(m.googleCalendarConnected),
+        calendarId: m.googleCalendarId || 'primary',
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Agenda agregada da equipe (só admin/owner).
+ * Query: startDate, endDate, memberUserId? (filtra um colaborador)
+ */
+async function getTeamCalendarEvents(req, res, next) {
+  try {
+    if (!isOrgAdminRequest(req)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Apenas administradores podem ver a agenda da equipe',
+      });
+    }
+
+    let options;
+    try {
+      options = parseRangeOptions(req);
+    } catch (err) {
+      return res.status(err.status || 400).json({ success: false, error: err.message });
+    }
+
+    const memberFilter =
+      typeof req.query.memberUserId === 'string' ? req.query.memberUserId.trim() : null;
+
+    let membersQuery;
+    if (!req.orgId) {
+      membersQuery = User.find({ _id: req.userId }).select(
+        'name email googleCalendarConnected googleCalendarId role status',
+      );
+    } else {
+      membersQuery = User.find({
+        organizationId: req.orgId,
+        status: { $ne: 'disabled' },
+      }).select('name email googleCalendarConnected googleCalendarId role status');
+    }
+
+    const members = await membersQuery.sort({ role: 1, name: 1 }).lean();
+    const memberMeta = members.map((m) => ({
+      id: String(m._id),
+      name: m.name,
+      email: m.email,
+      role: m.role || 'member',
+      connected: Boolean(m.googleCalendarConnected),
+      calendarId: m.googleCalendarId || 'primary',
+    }));
+
+    let targets = members.filter((m) => m.googleCalendarConnected);
+    if (memberFilter) {
+      targets = targets.filter((m) => String(m._id) === memberFilter);
+      if (targets.length === 0) {
+        const exists = members.find((m) => String(m._id) === memberFilter);
+        return res.json({
+          success: true,
+          data: [],
+          members: memberMeta,
+          totalEvents: 0,
+          warnings: exists
+            ? [
+                {
+                  memberUserId: memberFilter,
+                  memberName: exists.name,
+                  message: exists.googleCalendarConnected
+                    ? 'Não foi possível carregar a agenda'
+                    : 'Colaborador ainda não conectou o Google Calendar',
+                },
+              ]
+            : [{ memberUserId: memberFilter, message: 'Membro não encontrado' }],
+        });
+      }
+    }
+
+    const warnings = [];
+    const settled = await Promise.all(
+      targets.map(async (member) => {
+        const memberId = String(member._id);
+        try {
+          const events = await getEvents(member._id, {
+            ...options,
+            calendarId: member.googleCalendarId || 'primary',
+          });
+          return events.map((event) => ({
+            ...event,
+            id: `${memberId}:${event.id}`,
+            sourceEventId: event.id,
+            memberUserId: memberId,
+            memberName: member.name,
+            memberEmail: member.email,
+          }));
+        } catch (err) {
+          warnings.push({
+            memberUserId: memberId,
+            memberName: member.name,
+            message: err.message || 'Erro ao carregar agenda',
+          });
+          return [];
+        }
+      }),
+    );
+
+    const events = settled.flat().sort((a, b) => {
+      const ta = a.start ? new Date(a.start).getTime() : 0;
+      const tb = b.start ? new Date(b.start).getTime() : 0;
+      return ta - tb;
+    });
+
+    return res.json({
+      success: true,
+      data: events,
+      members: memberMeta,
+      totalEvents: events.length,
+      warnings,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   getCalendarEvents,
-  getCalendars
+  getCalendars,
+  getTeamCalendarMembers,
+  getTeamCalendarEvents,
 };
 
 

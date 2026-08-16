@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const attemptSchema = new mongoose.Schema(
   {
@@ -76,5 +77,7 @@ const aiUsageEventSchema = new mongoose.Schema(
 aiUsageEventSchema.index({ userId: 1, createdAt: -1 });
 aiUsageEventSchema.index({ eventType: 1, outcome: 1, createdAt: -1 });
 aiUsageEventSchema.index({ createdAt: -1 });
+
+aiUsageEventSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('AiUsageEvent', aiUsageEventSchema);

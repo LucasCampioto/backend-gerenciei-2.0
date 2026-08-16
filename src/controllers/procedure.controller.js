@@ -1,5 +1,6 @@
 const Procedure = require('../models/Procedure');
 const mongoose = require('mongoose');
+const { tenantFilter, tenantDocFilter, tenantCreateFields } = require('../utils/tenantScope');
 
 // Converter _id para id e remover campos internos
 function formatProcedure(procedure) {
@@ -18,7 +19,7 @@ function formatProcedure(procedure) {
 
 async function getAllProcedures(req, res, next) {
   try {
-    const query = { userId: req.userId };
+    const query = { ...tenantFilter(req) };
     const category = typeof req.query.category === 'string' ? req.query.category.trim() : '';
     if (category === 'estetica' || category === 'cursos' || category === 'estetica_avancada') {
       query.category = category;
@@ -41,7 +42,7 @@ async function createProcedure(req, res, next) {
     const { name, description, value, returnAfterDays, category, compatibleWith } = req.body;
     
     const procedure = new Procedure({
-      userId: req.userId,
+      ...tenantCreateFields(req),
       name,
       description,
       value,
@@ -85,7 +86,7 @@ async function updateProcedure(req, res, next) {
     }
 
     const procedure = await Procedure.findOneAndUpdate(
-      { _id: id, userId: req.userId },
+      { _id: id, ...tenantFilter(req) },
       update,
       { new: true, runValidators: true }
     );
@@ -119,8 +120,7 @@ async function deleteProcedure(req, res, next) {
     }
     
     const procedure = await Procedure.findOneAndDelete({
-      _id: id,
-      userId: req.userId
+      _id: id, ...tenantFilter(req)
     });
     
     if (!procedure) {

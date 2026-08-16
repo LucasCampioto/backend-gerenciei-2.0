@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const STOCK_UNITS = ['un', 'ml', 'cx', 'frasco', 'kit', 'g', 'kg', 'l'];
 
@@ -60,6 +61,8 @@ const stockItemSchema = new mongoose.Schema(
 );
 
 stockItemSchema.index({ userId: 1, name: 1 });
+
+stockItemSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('StockItem', stockItemSchema);
 module.exports.STOCK_UNITS = STOCK_UNITS;

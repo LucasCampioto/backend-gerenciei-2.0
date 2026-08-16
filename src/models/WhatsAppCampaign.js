@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const OBJECTIVES = [
   'increase_sales',
@@ -22,6 +23,20 @@ const messageVariantSchema = new mongoose.Schema(
     id: { type: String, required: true },
     label: { type: String, default: '' },
     body: { type: String, required: true },
+  },
+  { _id: false }
+);
+
+const campaignLeadSchema = new mongoose.Schema(
+  {
+    id: { type: String, required: true },
+    clientId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Client',
+      default: null,
+    },
+    name: { type: String, default: '', trim: true },
+    phone: { type: String, default: '', trim: true },
   },
   { _id: false }
 );
@@ -74,6 +89,11 @@ const whatsAppCampaignSchema = new mongoose.Schema(
         ref: 'Client',
       },
     ],
+    /** Snapshot editável (add/editar telefone/excluir) usado no disparo. */
+    leads: {
+      type: [campaignLeadSchema],
+      default: [],
+    },
     messageVariants: {
       type: [messageVariantSchema],
       default: [],
@@ -114,6 +134,8 @@ const whatsAppCampaignSchema = new mongoose.Schema(
 );
 
 whatsAppCampaignSchema.index({ userId: 1, dateKey: 1, status: 1 });
+
+whatsAppCampaignSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('WhatsAppCampaign', whatsAppCampaignSchema);
 module.exports.OBJECTIVES = OBJECTIVES;

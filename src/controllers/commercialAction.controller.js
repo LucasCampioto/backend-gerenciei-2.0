@@ -1,4 +1,5 @@
 const CommercialAction = require('../models/CommercialAction');
+const { tenantFilter, tenantDocFilter, tenantCreateFields, scopeUserId } = require('../utils/tenantScope');
 const {
   buildClosingQueue,
   updateCommercialAction,
@@ -9,8 +10,8 @@ async function listCommercialActions(req, res, next) {
   try {
     const refresh = req.query.refresh === '1' || req.query.refresh === 'true';
     const aiDailyCache = require('../services/aiDailyCache.service');
-    const closingRankCache = await aiDailyCache.getDaily(req.userId, 'closing_rank');
-    const data = await buildClosingQueue(req.userId, {
+    const closingRankCache = await aiDailyCache.getDaily(scopeUserId(req), 'closing_rank');
+    const data = await buildClosingQueue(scopeUserId(req), {
       refresh: refresh || !closingRankCache?.payload,
       runAiRank: false,
     });
@@ -22,7 +23,7 @@ async function listCommercialActions(req, res, next) {
 
 async function patchCommercialAction(req, res, next) {
   try {
-    const data = await updateCommercialAction(req.userId, req.params.id, req.body);
+    const data = await updateCommercialAction(scopeUserId(req), req.params.id, req.body);
     res.json({ success: true, data });
   } catch (error) {
     if (error.statusCode === 404) {
@@ -34,7 +35,7 @@ async function patchCommercialAction(req, res, next) {
 
 async function completeCommercialAction(req, res, next) {
   try {
-    const data = await updateCommercialAction(req.userId, req.params.id, {
+    const data = await updateCommercialAction(scopeUserId(req), req.params.id, {
       status: 'done',
       outcome: req.body.outcome || 'contacted',
       realizedRevenue: req.body.realizedRevenue,
@@ -51,7 +52,7 @@ async function completeCommercialAction(req, res, next) {
 
 async function snoozeCommercialAction(req, res, next) {
   try {
-    const data = await updateCommercialAction(req.userId, req.params.id, {
+    const data = await updateCommercialAction(scopeUserId(req), req.params.id, {
       status: 'snoozed',
       snoozedUntil: req.body.snoozedUntil,
       feedback: req.body.feedback,
@@ -67,7 +68,7 @@ async function snoozeCommercialAction(req, res, next) {
 
 async function dismissCommercialAction(req, res, next) {
   try {
-    const data = await updateCommercialAction(req.userId, req.params.id, {
+    const data = await updateCommercialAction(scopeUserId(req), req.params.id, {
       status: 'dismissed',
       feedback: req.body.feedback || 'rejected',
       outcome: req.body.outcome || null,
@@ -83,7 +84,7 @@ async function dismissCommercialAction(req, res, next) {
 
 async function feedbackCommercialAction(req, res, next) {
   try {
-    const data = await updateCommercialAction(req.userId, req.params.id, {
+    const data = await updateCommercialAction(scopeUserId(req), req.params.id, {
       feedback: req.body.feedback,
       editedPayload: req.body.editedPayload,
       suggestedMessage: req.body.suggestedMessage,
@@ -101,8 +102,7 @@ async function feedbackCommercialAction(req, res, next) {
 async function getCommercialAction(req, res, next) {
   try {
     const action = await CommercialAction.findOne({
-      _id: req.params.id,
-      userId: req.userId,
+      _id: req.params.id, ...tenantFilter(req),
     });
     if (!action) {
       return res.status(404).json({ success: false, error: 'Ação não encontrada' });

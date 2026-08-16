@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const dailyBriefingSchema = new mongoose.Schema({
   userId: {
@@ -21,5 +22,7 @@ const dailyBriefingSchema = new mongoose.Schema({
 });
 
 dailyBriefingSchema.index({ userId: 1, date: 1 }, { unique: true });
+
+dailyBriefingSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('DailyBriefing', dailyBriefingSchema);

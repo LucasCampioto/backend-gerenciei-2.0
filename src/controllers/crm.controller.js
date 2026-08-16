@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Client = require('../models/Client');
 const ClientActivity = require('../models/ClientActivity');
 const Sale = require('../models/Sale');
+const { tenantFilter, tenantDocFilter, tenantCreateFields, scopeUserId } = require('../utils/tenantScope');
 const {
   logActivity,
   formatActivity,
@@ -151,7 +152,7 @@ const PIPELINE_STAGE_LABELS = {
 
 async function getCrmClients(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const {
       clientGroup,
       category,
@@ -255,7 +256,7 @@ async function getCrmClients(req, res, next) {
 
 async function getCrmDashboard(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const { startDate, endDate } = req.query;
 
     const activityQuery = { userId: userObjectId };
@@ -368,7 +369,7 @@ async function getClientHistory(req, res, next) {
     }
 
     const activities = await ClientActivity.find({
-      userId: req.userId,
+      ...tenantCreateFields(req),
       clientId: id,
     })
       .sort({ createdAt: -1 })
@@ -405,7 +406,7 @@ async function updateCrmClient(req, res, next) {
       return res.status(400).json({ success: false, error: 'ID inválido' });
     }
 
-    const existing = await Client.findOne({ _id: id, userId: req.userId });
+    const existing = await Client.findOne({ _id: id, ...tenantFilter(req) });
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Cliente não encontrado' });
     }
@@ -442,7 +443,7 @@ async function updateCrmClient(req, res, next) {
           updateData.pipelineStage = 'won';
         }
         await logActivity({
-          userId: req.userId,
+          ...tenantCreateFields(req),
           clientId: existing._id,
           clientName: displayName,
           type: 'note',
@@ -473,7 +474,7 @@ async function updateCrmClient(req, res, next) {
     if (clientGroup !== undefined && clientGroup !== existing.clientGroup) {
       updateData.clientGroup = clientGroup;
       await logActivity({
-        userId: req.userId,
+        ...tenantCreateFields(req),
         clientId: existing._id,
         clientName: displayName,
         type: 'group_change',
@@ -486,7 +487,7 @@ async function updateCrmClient(req, res, next) {
     if (noReturnReason !== undefined && noReturnReason !== existing.noReturnReason) {
       updateData.noReturnReason = noReturnReason;
       await logActivity({
-        userId: req.userId,
+        ...tenantCreateFields(req),
         clientId: existing._id,
         clientName: displayName,
         type: 'reason_update',
@@ -497,7 +498,7 @@ async function updateCrmClient(req, res, next) {
     if (improvementReason !== undefined && improvementReason !== existing.improvementReason) {
       updateData.improvementReason = improvementReason;
       await logActivity({
-        userId: req.userId,
+        ...tenantCreateFields(req),
         clientId: existing._id,
         clientName: displayName,
         type: 'reason_update',
@@ -516,7 +517,7 @@ async function updateCrmClient(req, res, next) {
           ? ` · Motivo: ${String(lostReason).trim()}`
           : '';
       await logActivity({
-        userId: req.userId,
+        ...tenantCreateFields(req),
         clientId: existing._id,
         clientName: displayName,
         type: 'stage_change',
@@ -526,7 +527,7 @@ async function updateCrmClient(req, res, next) {
 
     if (note && !updateData.clientGroup) {
       await logActivity({
-        userId: req.userId,
+        ...tenantCreateFields(req),
         clientId: existing._id,
         clientName: displayName,
         type: 'note',
@@ -537,13 +538,13 @@ async function updateCrmClient(req, res, next) {
     let client = existing;
     if (Object.keys(updateData).length > 0) {
       client = await Client.findOneAndUpdate(
-        { _id: id, userId: req.userId },
+        { _id: id, ...tenantFilter(req) },
         updateData,
         { new: true, runValidators: true }
       );
     }
 
-    const lastSaleMap = await getLastSalesByClient(new mongoose.Types.ObjectId(req.userId));
+    const lastSaleMap = await getLastSalesByClient(new mongoose.Types.ObjectId(scopeUserId(req)));
     const formatted = formatCrmClient(client, lastSaleMap);
     if (formatted.lastAppointment) {
       formatted.lastAppointment = new Date(formatted.lastAppointment).toISOString();
@@ -568,13 +569,13 @@ async function addCrmAction(req, res, next) {
       return res.status(400).json({ success: false, error: 'ID inválido' });
     }
 
-    const client = await Client.findOne({ _id: id, userId: req.userId });
+    const client = await Client.findOne({ _id: id, ...tenantFilter(req) });
     if (!client) {
       return res.status(404).json({ success: false, error: 'Cliente não encontrado' });
     }
 
     const activity = await logActivity({
-      userId: req.userId,
+      ...tenantCreateFields(req),
       clientId: client._id,
       clientName: client.name,
       type: type || 'note',
@@ -600,8 +601,7 @@ async function deleteCrmActivity(req, res, next) {
     }
 
     const deleted = await ClientActivity.findOneAndDelete({
-      _id: activityId,
-      userId: req.userId,
+      _id: activityId, ...tenantFilter(req),
     });
 
     if (!deleted) {
@@ -619,7 +619,7 @@ async function deleteCrmActivity(req, res, next) {
 
 async function getActionQueue(req, res, next) {
   try {
-    const queue = await buildActionQueue(req.userId);
+    const queue = await buildActionQueue(scopeUserId(req));
     res.json({
       success: true,
       data: {
@@ -636,7 +636,7 @@ async function getActionQueue(req, res, next) {
 async function getDueReturnsHandler(req, res, next) {
   try {
     const withinDays = Math.min(Math.max(parseInt(req.query.withinDays, 10) || 14, 1), 180);
-    const dueReturns = await getDueReturns(req.userId, { withinDays });
+    const dueReturns = await getDueReturns(scopeUserId(req), { withinDays });
     res.json({
       success: true,
       data: dueReturns,
@@ -653,7 +653,7 @@ async function getClientJourney(req, res, next) {
       return res.status(400).json({ success: false, error: 'ID inválido' });
     }
 
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const clientObjectId = new mongoose.Types.ObjectId(id);
 
     const client = await Client.findOne({ _id: clientObjectId, userId: userObjectId }).lean();
@@ -751,12 +751,13 @@ async function getClientJourney(req, res, next) {
     for (const doc of documents) {
       events.push({
         type: 'document',
-        title: 'Documento assinado',
-        detail: doc.fileName || 'Documento',
+        title: doc.origin === 'physical_scan' ? 'Ficha física' : 'Documento assinado',
+        detail: doc.title || doc.fileName || 'Documento',
         date: doc.signedAt || doc.createdAt,
         meta: {
           documentId: doc._id.toString(),
           fileName: doc.fileName,
+          origin: doc.origin || 'digital_signature',
         },
       });
     }
@@ -790,13 +791,13 @@ async function getClientJourney(req, res, next) {
 
 async function getPipelineBoard(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const wonLostDays = Math.min(Math.max(parseInt(req.query.wonLostDays, 10) || 60, 7), 365);
     const wonLostCutoff = new Date();
     wonLostCutoff.setDate(wonLostCutoff.getDate() - wonLostDays);
 
     // Lead com venda → cliente; cliente em etapa ativa → won
-    await syncLeadsWithSales(req.userId).catch(() => {});
+    await syncLeadsWithSales(scopeUserId(req)).catch(() => {});
     await Client.updateMany(
       {
         userId: userObjectId,

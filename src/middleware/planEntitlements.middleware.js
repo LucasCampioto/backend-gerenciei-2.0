@@ -5,6 +5,8 @@ const {
   planHasFeature,
   FEATURE_LOCKED_MESSAGE,
 } = require('../services/simulation/planEntitlements');
+const { resolveOrgBillingUser } = require('../services/orgBilling.service');
+const { isSubscriptionBypassUser } = require('../services/simulation/subscriptionBypass');
 
 function pathname(url) {
   const q = url.indexOf('?');
@@ -75,7 +77,10 @@ function createPlanEntitlementsGuard(jwtSecret) {
     const user = await User.findById(userId).lean();
     if (!user) return next();
 
-    const tier = resolvePlanTier(user);
+    const billingUser = isSubscriptionBypassUser(user)
+      ? user
+      : await resolveOrgBillingUser(user);
+    const tier = resolvePlanTier(billingUser);
     if (planHasFeature(tier, feature)) return next();
 
     return res.status(403).json({

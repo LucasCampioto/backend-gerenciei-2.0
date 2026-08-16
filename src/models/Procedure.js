@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const procedureSchema = new mongoose.Schema({
   userId: {
@@ -41,6 +42,8 @@ const procedureSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
+
+procedureSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('Procedure', procedureSchema);
 

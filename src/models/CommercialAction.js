@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const commercialActionSchema = new mongoose.Schema({
   userId: {
@@ -142,5 +143,7 @@ const commercialActionSchema = new mongoose.Schema({
 
 commercialActionSchema.index({ userId: 1, status: 1, priority: -1 });
 commercialActionSchema.index({ userId: 1, clientId: 1, status: 1 });
+
+commercialActionSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('CommercialAction', commercialActionSchema);

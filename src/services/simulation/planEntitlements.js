@@ -108,6 +108,23 @@ function planHasFeature(tier, feature) {
 const FEATURE_LOCKED_MESSAGE =
   'Este recurso está disponível no plano Profissional. Faça upgrade em Configurações → Assinatura.';
 
+/**
+ * Limite de colaboradores (assentos) além do dono da conta.
+ * O owner/admin principal NÃO conta nesse número.
+ * null = ilimitado.
+ * @param {PlanTier | string | null | undefined} tier
+ * @returns {number | null}
+ */
+function seatLimitForPlanTier(tier) {
+  const t = String(tier || '')
+    .trim()
+    .toLowerCase();
+  if (t === 'gestao') return 0;
+  if (t === 'profissional') return 3;
+  if (t === 'enterprise' || t === 'legado') return null;
+  return 0;
+}
+
 module.exports = {
   VALID_TIERS,
   GESTAO_FEATURES,
@@ -118,4 +135,5 @@ module.exports = {
   resolvePlanTierFromPriceId,
   resolvePlanTier,
   planHasFeature,
+  seatLimitForPlanTier,
 };

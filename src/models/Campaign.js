@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 /**
  * `content` é Mixed de propósito: o conteúdo é gerado pela IA e evolui rápido
@@ -151,5 +152,7 @@ const campaignSchema = new mongoose.Schema(
   },
   { timestamps: true, minimize: false }
 );
+
+campaignSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('Campaign', campaignSchema);

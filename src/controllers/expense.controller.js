@@ -1,5 +1,6 @@
 const Expense = require('../models/Expense');
 const mongoose = require('mongoose');
+const { tenantFilter, tenantDocFilter, tenantCreateFields } = require('../utils/tenantScope');
 
 function formatExpense(expense) {
   const obj = expense.toObject();
@@ -16,7 +17,7 @@ async function getAllExpenses(req, res, next) {
   try {
     const { startDate, endDate, category, page = 1, limit = 10 } = req.query;
     
-    const query = { userId: req.userId };
+    const query = { ...tenantFilter(req) };
     
     if (startDate || endDate) {
       query.createdAt = {};
@@ -80,7 +81,7 @@ async function createExpense(req, res, next) {
     const { description, value, category } = req.body;
     
     const expense = new Expense({
-      userId: req.userId,
+      ...tenantCreateFields(req),
       description,
       value,
       category
@@ -111,7 +112,7 @@ async function updateExpense(req, res, next) {
     }
     
     const expense = await Expense.findOneAndUpdate(
-      { _id: id, userId: req.userId },
+      { _id: id, ...tenantFilter(req) },
       { description, value, category },
       { new: true, runValidators: true }
     );
@@ -145,8 +146,7 @@ async function deleteExpense(req, res, next) {
     }
     
     const expense = await Expense.findOneAndDelete({
-      _id: id,
-      userId: req.userId
+      _id: id, ...tenantFilter(req)
     });
     
     if (!expense) {

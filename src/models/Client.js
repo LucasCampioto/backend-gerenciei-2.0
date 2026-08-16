@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const clientSchema = new mongoose.Schema({
   userId: {
@@ -210,5 +211,7 @@ const clientSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
+
+clientSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('Client', clientSchema);

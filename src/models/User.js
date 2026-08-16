@@ -159,6 +159,34 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: null,
   },
+  /** Tenant multi-usuário — campos opcionais (legado sem org continua válido). */
+  organizationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Organization',
+    required: false,
+    default: null,
+    index: true,
+  },
+  role: {
+    type: String,
+    enum: ['owner', 'admin', 'member'],
+    required: false,
+    default: undefined,
+  },
+  permissions: {
+    type: [String],
+    default: undefined,
+  },
+  status: {
+    type: String,
+    enum: ['active', 'invited', 'disabled'],
+    required: false,
+    default: 'active',
+  },
+  mustSetPassword: {
+    type: Boolean,
+    default: false,
+  },
 }, {
   timestamps: true
 });

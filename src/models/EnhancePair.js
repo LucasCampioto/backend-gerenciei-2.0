@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const enhancePairSchema = new mongoose.Schema(
   {
@@ -13,5 +14,7 @@ const enhancePairSchema = new mongoose.Schema(
 );
 
 enhancePairSchema.index({ userId: 1, pairId: 1 });
+
+enhancePairSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('EnhancePair', enhancePairSchema);

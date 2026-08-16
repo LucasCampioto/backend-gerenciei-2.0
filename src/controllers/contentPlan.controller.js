@@ -1,3 +1,4 @@
+const { tenantFilter, tenantCreateFields, scopeUserId } = require('../utils/tenantScope');
 const {
   getOrCreateContentPlan,
   markContentPost,
@@ -5,7 +6,7 @@ const {
 
 async function getPlan(req, res, next) {
   try {
-    const data = await getOrCreateContentPlan(req.userId, {
+    const data = await getOrCreateContentPlan(scopeUserId(req), {
       month: req.query.month,
     });
     res.json({ success: true, data });
@@ -16,7 +17,7 @@ async function getPlan(req, res, next) {
 
 async function regeneratePlan(req, res, next) {
   try {
-    const data = await getOrCreateContentPlan(req.userId, {
+    const data = await getOrCreateContentPlan(scopeUserId(req), {
       month: req.body?.month,
       regenerate: Boolean(req.body?.regenerate ?? true),
     });
@@ -29,7 +30,7 @@ async function regeneratePlan(req, res, next) {
 async function patchPost(req, res, next) {
   try {
     const data = await markContentPost(
-      req.userId,
+      scopeUserId(req),
       req.params.idx,
       req.body?.status
     );

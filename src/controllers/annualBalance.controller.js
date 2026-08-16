@@ -1,3 +1,4 @@
+const { tenantFilter, tenantCreateFields, scopeUserId } = require('../utils/tenantScope');
 const mongoose = require('mongoose');
 const Sale = require('../models/Sale');
 const Expense = require('../models/Expense');
@@ -8,7 +9,7 @@ function round2(n) {
 
 async function getAnnualBalance(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const maxYear = new Date().getUTCFullYear();
 
     const [salesByYear, expensesByYear] = await Promise.all([

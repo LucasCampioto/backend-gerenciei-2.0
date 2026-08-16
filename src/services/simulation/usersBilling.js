@@ -2,6 +2,10 @@ const { randomBytes } = require('crypto');
 const User = require('../../models/User');
 const { applyQuotaPeriodResetIfNeeded } = require('./simulationQuotas');
 const { isSubscriptionBypassUser } = require('./subscriptionBypass');
+const {
+  resolveOrgBillingUser,
+  overlayPublicBillingFields,
+} = require('../orgBilling.service');
 
 /**
  * Adaptação de luni users.js para o User Gerenciei.
@@ -24,11 +28,17 @@ function userToPublic(doc) {
     accountType: doc.accountType === 'partner_test' ? 'partner_test' : 'official',
   };
   if (doc._id) out.id = String(doc._id);
-  if (isSubscriptionBypassUser(doc)) out.subscriptionBillingBypass = true;
-  if (doc.subscriptionStatus) out.subscriptionStatus = doc.subscriptionStatus;
+  if (isSubscriptionBypassUser(doc)) {
+    out.subscriptionBillingBypass = true;
+    out.subscriptionStatus = 'active';
+  } else if (doc.subscriptionStatus) {
+    out.subscriptionStatus = doc.subscriptionStatus;
+  }
   if (doc.trialEndsAt) out.trialEndsAt = doc.trialEndsAt.toISOString();
   if (doc.currentPeriodEnd) out.currentPeriodEnd = doc.currentPeriodEnd.toISOString();
-  if (doc.cancelAtPeriodEnd === true) out.cancelAtPeriodEnd = true;
+  if (doc.cancelAtPeriodEnd === true && !isSubscriptionBypassUser(doc)) {
+    out.cancelAtPeriodEnd = true;
+  }
   if (doc.partnerTestExpiresAt) out.partnerTestExpiresAt = doc.partnerTestExpiresAt.toISOString();
   if (doc.termsAcceptedAt) out.termsAcceptedAt = doc.termsAcceptedAt.toISOString();
   if (doc.privacyAcceptedAt) out.privacyAcceptedAt = doc.privacyAcceptedAt.toISOString();
@@ -37,7 +47,19 @@ function userToPublic(doc) {
     out.patientDataResponsibilityAckAt = doc.patientDataResponsibilityAckAt.toISOString();
   }
   if (doc.planTier) out.planTier = String(doc.planTier);
+  if (doc.organizationId) out.organizationId = String(doc.organizationId);
+  if (doc.role) out.role = doc.role;
+  if (Array.isArray(doc.permissions)) out.permissions = doc.permissions;
+  if (doc.status) out.status = doc.status;
+  if (doc.mustSetPassword === true) out.mustSetPassword = true;
   return out;
+}
+
+async function userToPublicWithOrgBilling(doc) {
+  const out = userToPublic(doc);
+  if (isSubscriptionBypassUser(doc)) return out;
+  const billingUser = await resolveOrgBillingUser(doc);
+  return overlayPublicBillingFields(out, billingUser);
 }
 
 function resolvePartnerTestExpiresAt({ partnerTestExpiresAt, partnerTestDurationDays }) {
@@ -75,6 +97,7 @@ async function createUser({ name, clinic, email, password }) {
 
 /**
  * Cria usuário com senha em texto plano — o User Gerenciei faz hash no pre('save').
+ * Sempre provisiona Organization + role owner (conta nova = org nova).
  */
 async function createUserWithPassword({ name, clinic, email, password, firstAccess = true }) {
   const e = String(email).toLowerCase().trim();
@@ -88,7 +111,11 @@ async function createUserWithPassword({ name, clinic, email, password, firstAcce
     notifSms: false,
     firstAccess: firstAccess === true,
   });
-  return user;
+  const { attachOrgAfterUserCreate } = require('../organization.service');
+  const { user: withOrg } = await attachOrgAfterUserCreate(user, {
+    name: clinic || name,
+  });
+  return withOrg;
 }
 
 async function verifyPassword(user, password) {
@@ -220,11 +247,16 @@ async function createPartnerTestUser({
     previewQuotaPeriodKey: '',
     partnerTestExpiresAt: expiresAt,
   });
-  return { user, plainPassword: password != null && String(password).length > 0 ? null : pwd };
+  const { attachOrgAfterUserCreate } = require('../organization.service');
+  const { user: withOrg } = await attachOrgAfterUserCreate(user, {
+    name: clinic || name,
+  });
+  return { user: withOrg, plainPassword: password != null && String(password).length > 0 ? null : pwd };
 }
 
 module.exports = {
   userToPublic,
+  userToPublicWithOrgBilling,
   findUserByIdWithQuotaReset,
   findUserByEmail,
   createUser,

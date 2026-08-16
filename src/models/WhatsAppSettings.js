@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const DEFAULT_TEMPLATE =
   'Olá {{nome}}! Passando para confirmar seu horário de hoje, {{data}} às {{horario}}. Qualquer imprevisto, nos avise por aqui.';
@@ -121,5 +122,7 @@ whatsAppSettingsSchema.statics.DEFAULT_NO_SHOW_FOLLOW_UP_TEMPLATE =
   DEFAULT_NO_SHOW_FOLLOW_UP_TEMPLATE;
 whatsAppSettingsSchema.statics.DEFAULT_FUNNEL_TEMPLATES = DEFAULT_FUNNEL_TEMPLATES;
 whatsAppSettingsSchema.statics.FUNNEL_TEMPLATE_KEYS = FUNNEL_TEMPLATE_KEYS;
+
+whatsAppSettingsSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('WhatsAppSettings', whatsAppSettingsSchema);

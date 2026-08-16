@@ -1,4 +1,5 @@
 const PaymentFee = require('../models/PaymentFee');
+const { tenantFilter, tenantDocFilter, tenantCreateFields } = require('../utils/tenantScope');
 const {
   FEE_SCHEDULE,
   BRAND_GROUP_IDS,
@@ -28,7 +29,7 @@ async function getFeePercentageForUser(userId, paymentMethod, cardBrandGroup, in
 
 async function getAllPaymentFees(req, res, next) {
   try {
-    const stored = await PaymentFee.find({ userId: req.userId });
+    const stored = await PaymentFee.find({ ...tenantFilter(req) });
     const feeMap = {};
     for (const fee of stored) {
       feeMap[`${fee.brandGroup}:${fee.feeKey}`] = fee.feePercentage;
@@ -89,19 +90,19 @@ async function updatePaymentFees(req, res, next) {
       }
 
       docs.push({
-        userId: req.userId,
+        ...tenantCreateFields(req),
         brandGroup,
         feeKey,
         feePercentage: round2(pct),
       });
     }
 
-    await PaymentFee.deleteMany({ userId: req.userId });
+    await PaymentFee.deleteMany({ ...tenantFilter(req) });
     if (docs.length > 0) {
       await PaymentFee.insertMany(docs, { ordered: true });
     }
 
-    const stored = await PaymentFee.find({ userId: req.userId });
+    const stored = await PaymentFee.find({ ...tenantFilter(req) });
     const feeMap = {};
     for (const fee of stored) {
       feeMap[`${fee.brandGroup}:${fee.feeKey}`] = fee.feePercentage;

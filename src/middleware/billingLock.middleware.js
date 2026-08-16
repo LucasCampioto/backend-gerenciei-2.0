@@ -5,6 +5,8 @@ const {
   getSubscriptionLockState,
   isSubscriptionAppLocked,
 } = require('../services/simulation/subscriptionAccess');
+const { resolveOrgBillingUser } = require('../services/orgBilling.service');
+const { isSubscriptionBypassUser } = require('../services/simulation/subscriptionBypass');
 
 function pathname(url) {
   const q = url.indexOf('?');
@@ -70,8 +72,13 @@ function createBillingLockGuard(jwtSecret) {
     const user = await User.findById(userId).lean();
     if (!user) return next();
 
-    if (user.accountType === 'partner_test' && !String(user.stripeSubscriptionId || '').trim()) {
-      if (!isPartnerTestAppLocked(user)) {
+    if (isSubscriptionBypassUser(user)) return next();
+
+    const billingUser = await resolveOrgBillingUser(user);
+    if (isSubscriptionBypassUser(billingUser)) return next();
+
+    if (billingUser.accountType === 'partner_test' && !String(billingUser.stripeSubscriptionId || '').trim()) {
+      if (!isPartnerTestAppLocked(billingUser)) {
         return next();
       }
       if (exemptWhenBillingLocked(p)) {
@@ -80,10 +87,10 @@ function createBillingLockGuard(jwtSecret) {
       return res.status(403).json({ message: LOCK_MESSAGE, code: 'PARTNER_TEST_LOCKED' });
     }
 
-    if (!isSubscriptionAppLocked(user)) return next();
+    if (!isSubscriptionAppLocked(billingUser)) return next();
     if (exemptWhenBillingLocked(p)) return next();
 
-    const subLock = getSubscriptionLockState(user);
+    const subLock = getSubscriptionLockState(billingUser);
     return res.status(403).json({
       message: subLock.message || 'Assinatura inativa.',
       code: subLock.code || 'SUBSCRIPTION_CANCELED',

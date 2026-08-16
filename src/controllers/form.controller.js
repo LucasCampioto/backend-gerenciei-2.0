@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const Form = require('../models/Form');
 const FormResponse = require('../models/FormResponse');
 const mongoose = require('mongoose');
+const { tenantFilter, tenantDocFilter, tenantCreateFields } = require('../utils/tenantScope');
 
 function generatePublicSlug() {
   return crypto.randomBytes(9).toString('base64url').slice(0, 12);
@@ -40,7 +41,7 @@ async function getResponseCountsByFormIds(formIds) {
 
 async function getAllForms(req, res, next) {
   try {
-    const forms = await Form.find({ userId: req.userId }).sort({ createdAt: -1 });
+    const forms = await Form.find({ ...tenantFilter(req) }).sort({ createdAt: -1 });
     const formIds = forms.map((f) => f._id);
     const countMap = await getResponseCountsByFormIds(formIds);
 
@@ -61,7 +62,7 @@ async function getFormById(req, res, next) {
       return res.status(400).json({ success: false, error: 'ID inválido' });
     }
 
-    const form = await Form.findOne({ _id: id, userId: req.userId });
+    const form = await Form.findOne({ _id: id, ...tenantFilter(req) });
     if (!form) {
       return res.status(404).json({ success: false, error: 'Formulário não encontrado' });
     }
@@ -91,7 +92,7 @@ async function createForm(req, res, next) {
     }
 
     const form = new Form({
-      userId: req.userId,
+      ...tenantCreateFields(req),
       title,
       description: description || '',
       status: status || 'active',
@@ -123,7 +124,7 @@ async function updateForm(req, res, next) {
     }
 
     const form = await Form.findOneAndUpdate(
-      { _id: id, userId: req.userId },
+      { _id: id, ...tenantFilter(req) },
       {
         title,
         description: description || '',
@@ -159,7 +160,7 @@ async function deleteForm(req, res, next) {
       return res.status(400).json({ success: false, error: 'ID inválido' });
     }
 
-    const form = await Form.findOneAndDelete({ _id: id, userId: req.userId });
+    const form = await Form.findOneAndDelete({ _id: id, ...tenantFilter(req) });
     if (!form) {
       return res.status(404).json({ success: false, error: 'Formulário não encontrado' });
     }

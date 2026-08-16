@@ -5,6 +5,8 @@ const mongoose = require('mongoose');
 const { getFeePercentageForUser, round2 } = require('./paymentFee.controller');
 const { logActivity } = require('../services/clientActivity.service');
 const CommercialAction = require('../models/CommercialAction');
+const { tenantFilter, tenantCreateFields, scopeUserId, actorScopedTenantFilter, actorScopedDocFilter, andFilters, isOrgAdminRequest, toObjectId } = require('../utils/tenantScope');
+const User = require('../models/User');
 const {
   promoteLeadFromSale,
   syncLeadsWithSales,
@@ -27,11 +29,12 @@ function parseClinicDayEnd(dateStr) {
   return new Date(dateStr);
 }
 
-function formatSale(sale) {
-  const obj = sale.toObject();
+function formatSale(sale, creatorNameById = null) {
+  const obj = sale.toObject ? sale.toObject() : sale;
+  const createdByUserId = obj.createdByUserId ? obj.createdByUserId.toString() : null;
   return {
-    id: obj._id.toString(),
-    items: obj.items.map(item => ({
+    id: (obj._id ?? sale._id).toString(),
+    items: (obj.items || []).map(item => ({
       procedureId: item.procedureId ? item.procedureId.toString() : item.procedureId,
       procedureName: item.procedureName,
       quantity: item.quantity,
@@ -52,109 +55,135 @@ function formatSale(sale) {
     clientId: obj.clientId ? obj.clientId.toString() : obj.clientId,
     clientName: obj.clientName,
     clientPhone: obj.clientPhone,
+    createdByUserId,
+    createdByName: createdByUserId && creatorNameById
+      ? creatorNameById.get(createdByUserId) || null
+      : null,
     createdAt: obj.createdAt
   };
 }
 
+async function loadCreatorNames(sales) {
+  const ids = [
+    ...new Set(
+      sales
+        .map((s) => (s.createdByUserId ? String(s.createdByUserId) : null))
+        .filter(Boolean),
+    ),
+  ];
+  if (ids.length === 0) return new Map();
+  const users = await User.find({ _id: { $in: ids } })
+    .select('name')
+    .lean();
+  return new Map(users.map((u) => [String(u._id), u.name]));
+}
+
 async function getAllSales(req, res, next) {
   try {
-    // Garante: lead com venda → cliente
-    await syncLeadsWithSales(req.userId).catch(() => {});
-
-    const { startDate, endDate, employeeId, clientId, page = 1, limit = 10 } = req.query;
-    
-    const query = { userId: req.userId };
-    
-    if (startDate || endDate) {
-      query.createdAt = {};
-      
-      if (startDate) {
-        query.createdAt.$gte = parseClinicDayStart(startDate);
-      }
-      if (endDate) {
-        query.createdAt.$lte = parseClinicDayEnd(endDate);
-      }
+    // Garante: lead com venda → cliente (só admin/owner sincroniza org inteira)
+    if (isOrgAdminRequest(req)) {
+      await syncLeadsWithSales(scopeUserId(req)).catch(() => {});
     }
-    
+
+    const { startDate, endDate, employeeId, clientId, createdByUserId, page = 1, limit = 10 } = req.query;
+
+    const clauses = [actorScopedTenantFilter(req)];
+
+    if (startDate || endDate) {
+      const createdAt = {};
+      if (startDate) createdAt.$gte = parseClinicDayStart(startDate);
+      if (endDate) createdAt.$lte = parseClinicDayEnd(endDate);
+      clauses.push({ createdAt });
+    }
+
     if (employeeId && mongoose.Types.ObjectId.isValid(employeeId)) {
-      query.employeeId = employeeId;
+      clauses.push({ employeeId });
     }
 
     if (clientId && mongoose.Types.ObjectId.isValid(clientId)) {
-      query.clientId = clientId;
+      clauses.push({ clientId });
+    }
+
+    // Admin pode filtrar por quem registrou; membro já está restrito ao próprio
+    if (
+      isOrgAdminRequest(req) &&
+      createdByUserId &&
+      mongoose.Types.ObjectId.isValid(createdByUserId)
+    ) {
+      clauses.push({ createdByUserId: new mongoose.Types.ObjectId(createdByUserId) });
     }
 
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
     if (search) {
       const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const regex = new RegExp(escaped, 'i');
-      query.$or = [
-        { clientName: regex },
-        { clientPhone: regex },
-        { 'items.procedureName': regex },
-      ];
+      clauses.push({
+        $or: [
+          { clientName: regex },
+          { clientPhone: regex },
+          { 'items.procedureName': regex },
+        ],
+      });
     }
-    
-    // Converter page e limit para números
+
+    const query = andFilters(...clauses);
+
     const pageNum = parseInt(page, 10) || 1;
     const limitNum = parseInt(limit, 10) || 10;
     const skip = (pageNum - 1) * limitNum;
-    
-    // Buscar total de documentos
+
     const total = await Sale.countDocuments(query);
-    
-    // Buscar documentos paginados
     const sales = await Sale.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limitNum);
-    
-    
-    // Calcular informações de paginação
+
     const totalPages = Math.ceil(total / limitNum);
     const hasNextPage = pageNum < totalPages;
     const hasPrevPage = pageNum > 1;
 
-    // Buscar todas as vendas (sem paginação) para calcular resumo por colaborador
-    const allSalesQuery = { 
-      userId: req.userId,
-      employeeId: { $exists: true, $ne: null } // Apenas vendas com employeeId válido
-    };
-    
+    // Resumo por colaborador — mesmo escopo de visibilidade
+    const summaryClauses = [
+      actorScopedTenantFilter(req),
+      { employeeId: { $exists: true, $ne: null } },
+    ];
     if (startDate || endDate) {
-      allSalesQuery.createdAt = {};
-      if (startDate) {
-        allSalesQuery.createdAt.$gte = parseClinicDayStart(startDate);
-      }
-      if (endDate) {
-        allSalesQuery.createdAt.$lte = parseClinicDayEnd(endDate);
-      }
+      const createdAt = {};
+      if (startDate) createdAt.$gte = parseClinicDayStart(startDate);
+      if (endDate) createdAt.$lte = parseClinicDayEnd(endDate);
+      summaryClauses.push({ createdAt });
     }
-    
-    // Se houver filtro específico de employeeId, aplicar
     if (employeeId && mongoose.Types.ObjectId.isValid(employeeId)) {
-      allSalesQuery.employeeId = new mongoose.Types.ObjectId(employeeId);
+      summaryClauses.push({ employeeId: new mongoose.Types.ObjectId(employeeId) });
     }
-
     if (search) {
       const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const regex = new RegExp(escaped, 'i');
-      allSalesQuery.$or = [
-        { clientName: regex },
-        { clientPhone: regex },
-        { 'items.procedureName': regex },
-      ];
+      summaryClauses.push({
+        $or: [
+          { clientName: regex },
+          { clientPhone: regex },
+          { 'items.procedureName': regex },
+        ],
+      });
+    }
+    if (
+      isOrgAdminRequest(req) &&
+      createdByUserId &&
+      mongoose.Types.ObjectId.isValid(createdByUserId)
+    ) {
+      summaryClauses.push({ createdByUserId: new mongoose.Types.ObjectId(createdByUserId) });
     }
 
-    const allSales = await Sale.find(allSalesQuery);
+    const allSales = await Sale.find(andFilters(...summaryClauses));
+    const creatorNames = await loadCreatorNames([...sales, ...allSales]);
 
-    // Agrupar vendas por colaborador
     const salesByEmployee = {};
-    
+
     allSales.forEach(sale => {
       if (sale.employeeId) {
         const empId = sale.employeeId.toString();
-        
+
         if (!salesByEmployee[empId]) {
           salesByEmployee[empId] = {
             employeeId: empId,
@@ -164,39 +193,35 @@ async function getAllSales(req, res, next) {
             totalCommission: 0
           };
         }
-        
+
         salesByEmployee[empId].sales.push(sale);
         salesByEmployee[empId].totalSalesValue += sale.totalValue || 0;
         salesByEmployee[empId].totalCommission += sale.commissionValue || 0;
       }
     });
 
-    // Buscar dados dos colaboradores e calcular percentual médio
     const summaryByEmployee = await Promise.all(
       Object.values(salesByEmployee).map(async (employeeData) => {
         try {
           const employee = await Employee.findOne({
-            _id: employeeData.employeeId,
-            userId: req.userId
+            _id: employeeData.employeeId, ...tenantFilter(req)
           });
 
           const salesCount = employeeData.sales.length;
           const totalSalesValue = employeeData.totalSalesValue;
           const totalCommission = employeeData.totalCommission;
-          
-          // Calcular percentual médio de comissão
-          // (totalCommission / totalSalesValue) * 100
-          const averageCommissionPercentage = totalSalesValue > 0 
-            ? (totalCommission / totalSalesValue) * 100 
+
+          const averageCommissionPercentage = totalSalesValue > 0
+            ? (totalCommission / totalSalesValue) * 100
             : 0;
 
           return {
             employeeId: employeeData.employeeId,
             employeeName: employee?.name || employeeData.employeeName || 'Colaborador não encontrado',
-            totalSalesValue: Math.round(totalSalesValue * 100) / 100, // Arredondar para 2 casas
+            totalSalesValue: Math.round(totalSalesValue * 100) / 100,
             salesCount,
-            totalCommission: Math.round(totalCommission * 100) / 100, // Arredondar para 2 casas
-            averageCommissionPercentage: Math.round(averageCommissionPercentage * 100) / 100 // Arredondar para 2 casas
+            totalCommission: Math.round(totalCommission * 100) / 100,
+            averageCommissionPercentage: Math.round(averageCommissionPercentage * 100) / 100
           };
         } catch (error) {
           console.error('Erro ao buscar colaborador:', error);
@@ -214,26 +239,44 @@ async function getAllSales(req, res, next) {
       })
     );
 
-    // Ordenar por total de vendas (maior para menor)
+    // Resumo por usuário de login (quem registrou) — útil para admin
+    const salesByCreator = {};
+    allSales.forEach((sale) => {
+      const uid = sale.createdByUserId ? String(sale.createdByUserId) : '_unknown';
+      if (!salesByCreator[uid]) {
+        salesByCreator[uid] = {
+          createdByUserId: uid === '_unknown' ? null : uid,
+          createdByName: uid === '_unknown' ? 'Sem registro' : creatorNames.get(uid) || 'Usuário',
+          salesCount: 0,
+          totalSalesValue: 0,
+        };
+      }
+      salesByCreator[uid].salesCount += 1;
+      salesByCreator[uid].totalSalesValue += sale.totalValue || 0;
+    });
+    const summaryByCreator = Object.values(salesByCreator).map((row) => ({
+      ...row,
+      totalSalesValue: Math.round(row.totalSalesValue * 100) / 100,
+    }));
+
     summaryByEmployee.sort((a, b) => b.totalSalesValue - a.totalSalesValue);
-    
-    // Calcular total líquido de TODAS as vendas (não apenas as paginadas)
     const totalNetValue = allSales.reduce((sum, s) => sum + (s.netValue || 0), 0);
-    
+
     res.json({
       success: true,
-      data: sales.map(formatSale),
-      totalNetValue: Math.round(totalNetValue * 100) / 100, // Total líquido de todas as vendas (não apenas paginadas)
+      data: sales.map((s) => formatSale(s, creatorNames)),
+      summaryByEmployee,
+      summaryByCreator,
+      visibility: isOrgAdminRequest(req) ? 'organization' : 'own',
+      totalNetValue: Math.round(totalNetValue * 100) / 100,
       pagination: {
         page: pageNum,
         limit: limitNum,
         total,
         totalPages,
         hasNextPage,
-        hasPrevPage,
-        success: true
-      },
-      summaryByEmployee
+        hasPrevPage
+      }
     });
   } catch (error) {
     next(error);
@@ -259,7 +302,7 @@ async function createSale(req, res, next) {
 
     const installmentCount = paymentMethod === 'crédito' ? (installments || 1) : 1;
     const feePercentage = await getFeePercentageForUser(
-      req.userId,
+      scopeUserId(req),
       paymentMethod,
       cardBrandGroup,
       installmentCount
@@ -273,7 +316,7 @@ async function createSale(req, res, next) {
         : 'default';
 
     const sale = new Sale({
-      userId: req.userId,
+      ...tenantCreateFields(req),
       items,
       totalValue,
       commissionValue: commission,
@@ -293,7 +336,7 @@ async function createSale(req, res, next) {
     
     await sale.save();
 
-    const linkedClient = await promoteLeadFromSale(req.userId, {
+    const linkedClient = await promoteLeadFromSale(scopeUserId(req), {
       clientId,
       clientPhone,
     });
@@ -308,7 +351,7 @@ async function createSale(req, res, next) {
 
       const recommendationId = req.body.recommendationId || '';
       await logActivity({
-        userId: req.userId,
+        ...tenantCreateFields(req),
         clientId: linkedClient._id,
         clientName: linkedClient.name,
         type: recommendationId ? 'recommendation_used' : 'note',
@@ -319,7 +362,7 @@ async function createSale(req, res, next) {
 
       await CommercialAction.updateMany(
         {
-          userId: req.userId,
+          ...tenantCreateFields(req),
           clientId: linkedClient._id,
           status: 'pending',
         },
@@ -356,10 +399,7 @@ async function deleteSale(req, res, next) {
       });
     }
     
-    const sale = await Sale.findOneAndDelete({
-      _id: id,
-      userId: req.userId
-    });
+    const sale = await Sale.findOneAndDelete(actorScopedDocFilter(req, id));
     
     if (!sale) {
       return res.status(404).json({
@@ -388,14 +428,15 @@ async function getSalesByEmployee(req, res, next) {
       });
     }
     
-    const sales = await Sale.find({
-      userId: req.userId,
-      employeeId
-    }).sort({ createdAt: -1 });
+    const sales = await Sale.find(
+      andFilters(actorScopedTenantFilter(req), { employeeId }),
+    ).sort({ createdAt: -1 });
+
+    const creatorNames = await loadCreatorNames(sales);
     
     res.json({
       success: true,
-      data: sales.map(formatSale)
+      data: sales.map((s) => formatSale(s, creatorNames))
     });
   } catch (error) {
     next(error);
@@ -412,14 +453,13 @@ async function getEmployeeSalesTotal(req, res, next) {
         error: 'ID do colaborador inválido'
       });
     }
+
+    const match = andFilters(actorScopedTenantFilter(req), {
+      employeeId: new mongoose.Types.ObjectId(employeeId),
+    });
     
     const result = await Sale.aggregate([
-      {
-        $match: {
-          userId: new mongoose.Types.ObjectId(req.userId),
-          employeeId: new mongoose.Types.ObjectId(employeeId)
-        }
-      },
+      { $match: match },
       {
         $group: {
           _id: null,

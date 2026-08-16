@@ -86,7 +86,7 @@ TRIAL_PERIOD_DAYS=7
 # Link de login nos e-mails de boas-vindas pós-assinatura / parceiro
 SUBSCRIPTION_WELCOME_LOGIN_URL=http://localhost:8080/login
 
-# IDs Mongo (User._id) isentos de bloqueio por assinatura inativa (vírgula)
+# IDs Mongo (User._id) e/ou e-mails isentos de bloqueio por assinatura (vírgula)
 SUBSCRIPTION_BYPASS_USER_IDS=
 # Cota do plano Starter (LUNI) para contas admin sem Stripe
 SUBSCRIPTION_BYPASS_MONTHLY_QUOTA=40
@@ -173,9 +173,20 @@ Automações plataforma → clínicas (cron):
 ```env
 RESEND_API_KEY=re_...
 EMAIL_FROM=Gerenciei <noreply@seudominio.com>
+# Opcional — defaults derivados de FRONTEND_URL
+FRONTEND_RESET_PASSWORD_URL=https://app.gerenciei.app/redefinir-senha
+FRONTEND_INVITE_URL=https://app.gerenciei.app/convite
+FRONTEND_URL=https://app.gerenciei.app
 ```
 
-Usado em boas-vindas de assinatura, conta parceiro e (quando implementado) reset de senha.
+Usado em boas-vindas de assinatura, conta parceiro, **reset de senha** e **convite de membro**.
+
+### Migração multi-org (clientes existentes)
+
+```bash
+npm run migrate:organizations          # dry-run
+npm run migrate:organizations:apply    # aplica Organization + backfill organizationId
+```
 
 ## Legal / termos
 

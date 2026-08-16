@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const documentSchema = new mongoose.Schema({
   userId: {
@@ -30,8 +31,24 @@ const documentSchema = new mongoose.Schema({
   },
   userEmail: {
     type: String,
-    required: true,
-    lowercase: true
+    lowercase: true,
+    required: function requiredUserEmail() {
+      return !this.clientId;
+    }
+  },
+  title: {
+    type: String,
+    trim: true,
+  },
+  origin: {
+    type: String,
+    enum: ['digital_signature', 'physical_scan'],
+    default: 'digital_signature',
+    index: true,
+  },
+  templateId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'DocumentTemplate',
   },
   observations: {
     type: String
@@ -61,6 +78,8 @@ const documentSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
+
+documentSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('Document', documentSchema);
 

@@ -1,3 +1,4 @@
+const { tenantFilter, tenantCreateFields, scopeUserId } = require('../utils/tenantScope');
 const mongoose = require('mongoose');
 const Sale = require('../models/Sale');
 const Client = require('../models/Client');
@@ -56,7 +57,7 @@ function monthLabelFromKey(key) {
 
 async function getProceduresByClient(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const { startDate, endDate } = req.query;
 
     if (!startDate || !endDate) {
@@ -190,7 +191,7 @@ async function getProceduresByClient(req, res, next) {
 
 async function getClientRecurrence(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const { startDate, endDate, inactiveDays = 30 } = req.query;
     const windowDays = Math.max(1, parseInt(inactiveDays, 10) || 30);
 
@@ -319,7 +320,7 @@ async function getClientRecurrence(req, res, next) {
 
 async function getLeadConversionFunnel(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const { startDate, endDate } = req.query;
 
     if (!startDate || !endDate) {

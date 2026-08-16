@@ -80,6 +80,30 @@ async function sendPasswordResetEmail({ to, resetUrl }) {
   await sendEmail({ to, subject, text });
 }
 
+async function sendMemberInviteEmail({ to, inviteUrl, orgName, inviterName, modulesLabel }) {
+  const subject = `Convite para a equipe — ${orgName || 'Gerenciei'}`;
+  const text = [
+    'Olá!',
+    '',
+    `${inviterName || 'Um administrador'} convidou você para a organização "${orgName || 'Gerenciei'}" no Gerenciei.`,
+    '',
+    modulesLabel ? `Acessos previstos: ${modulesLabel}` : '',
+    modulesLabel ? '' : null,
+    'Clique no link abaixo para definir sua senha e ativar o acesso (válido por 7 dias):',
+    '',
+    inviteUrl,
+    '',
+    'Se você não esperava este convite, ignore este e-mail.',
+    '',
+    'Um abraço,',
+    'Equipe Gerenciei',
+  ]
+    .filter((line) => line !== null)
+    .join('\n');
+
+  await sendEmail({ to, subject, text });
+}
+
 async function sendPartnerTestWelcomeEmail({ to, tempPassword, loginUrl }) {
   const url = loginUrl || loginUrlDefault();
   const subject = 'Sua conta parceiro Gerenciei';
@@ -128,6 +152,7 @@ async function sendSubscriptionActivatedForExistingUserEmail({ to, loginUrl }) {
 module.exports = {
   sendSubscriptionWelcomeEmail,
   sendPasswordResetEmail,
+  sendMemberInviteEmail,
   sendPartnerTestWelcomeEmail,
   sendSubscriptionActivatedForExistingUserEmail,
 };

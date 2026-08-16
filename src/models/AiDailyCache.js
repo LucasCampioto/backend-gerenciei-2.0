@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const KINDS = ['closing_rank', 'director', 'upsells', 'wa_campaigns'];
 
@@ -44,6 +45,8 @@ const aiDailyCacheSchema = new mongoose.Schema({
 });
 
 aiDailyCacheSchema.index({ userId: 1, date: 1, kind: 1 }, { unique: true });
+
+aiDailyCacheSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('AiDailyCache', aiDailyCacheSchema);
 module.exports.KINDS = KINDS;

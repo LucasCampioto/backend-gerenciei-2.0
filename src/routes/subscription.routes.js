@@ -16,6 +16,7 @@ const { provisionUserFromCheckoutSession } = require('../services/simulation/sub
 const { authenticate } = require('../middleware/auth.middleware');
 const { isSubscriptionBypassUser } = require('../services/simulation/subscriptionBypass');
 const { resolvePlanTier } = require('../services/simulation/planEntitlements');
+const { resolveOrgBillingUser } = require('../services/orgBilling.service');
 const User = require('../models/User');
 
 function localSubscriptionSummary(user) {
@@ -359,25 +360,29 @@ router.get('/current', authenticate, async (req, res) => {
       return;
     }
 
+    const billingUser = isSubscriptionBypassUser(user)
+      ? user
+      : (await resolveOrgBillingUser(user)) || user;
+
     // Contas admin (SUBSCRIPTION_BYPASS_USER_IDS): isentas de Stripe/assinatura.
-    if (isSubscriptionBypassUser(user)) {
-      res.json(bypassSubscriptionSummary(user));
+    if (isSubscriptionBypassUser(user) || isSubscriptionBypassUser(billingUser)) {
+      res.json(bypassSubscriptionSummary(billingUser));
       return;
     }
 
     if (!isStripeConfigured()) {
-      const subscriptionId = String(user.stripeSubscriptionId || '').trim();
-      const customerId = String(user.stripeCustomerId || '').trim();
+      const subscriptionId = String(billingUser.stripeSubscriptionId || '').trim();
+      const customerId = String(billingUser.stripeCustomerId || '').trim();
       // Sem Stripe: ainda dá para refletir estado local (ex.: sem assinatura).
       if (!subscriptionId || !customerId) {
-        res.json(localSubscriptionSummary(user));
+        res.json(localSubscriptionSummary(billingUser));
         return;
       }
       res.status(503).json({ message: 'Pagamentos não configurados (STRIPE_SECRET_KEY)' });
       return;
     }
 
-    const current = await getCurrentSubscriptionSummary(user);
+    const current = await getCurrentSubscriptionSummary(billingUser);
     res.json(current);
   } catch (e) {
     console.error(e);

@@ -1,7 +1,25 @@
 const Document = require('../models/Document');
+const DocumentTemplate = require('../models/DocumentTemplate');
+const Client = require('../models/Client');
 const mongoose = require('mongoose');
 const { s3Client, BUCKET_NAME, isS3Available } = require('../config/s3');
 const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const { tenantFilter, tenantCreateFields, andFilters } = require('../utils/tenantScope');
+const {
+  isPersistableDocumentUrl,
+  resolveStoredDocumentUrls,
+  resolveDownloadUrl,
+  extractS3ObjectKey,
+  isTemplateObjectKey,
+} = require('../utils/documentUrls');
+const {
+  normalizeOrigin,
+  parseSignedAt,
+  physicalScanError,
+  digitalSignatureError,
+  resolveSignerFields,
+  buildDocumentListParts,
+} = require('../utils/documentPayload');
 
 function toOptionalObjectId(value) {
   if (!value || value === '') return undefined;
@@ -10,16 +28,20 @@ function toOptionalObjectId(value) {
 }
 
 function formatDocument(doc) {
-  const obj = doc.toObject();
+  const obj = doc.toObject ? doc.toObject() : doc;
+  const persistableUrl = resolveDownloadUrl(obj);
   return {
     id: obj._id,
     fileName: obj.fileName,
     fileType: obj.fileType,
-    fileUrl: obj.fileUrl,
+    fileUrl: isPersistableDocumentUrl(obj.fileUrl) ? obj.fileUrl : (persistableUrl || obj.fileUrl),
     userName: obj.userName,
-    userEmail: obj.userEmail,
+    userEmail: obj.userEmail || null,
+    title: obj.title || null,
+    origin: obj.origin || 'digital_signature',
+    templateId: obj.templateId ? obj.templateId.toString() : null,
     observations: obj.observations,
-    signatureUrl: obj.signatureUrl,
+    signatureUrl: persistableUrl || obj.signatureUrl,
     signedAt: obj.signedAt,
     status: obj.status,
     clientId: obj.clientId ? obj.clientId.toString() : null,
@@ -30,18 +52,13 @@ function formatDocument(doc) {
 
 async function getAllDocuments(req, res, next) {
   try {
-    const { search } = req.query;
-    
-    const query = { userId: req.userId };
-    
-    if (search) {
-      query.$or = [
-        { fileName: { $regex: search, $options: 'i' } },
-        { userName: { $regex: search, $options: 'i' } },
-        { userEmail: { $regex: search, $options: 'i' } }
-      ];
+    const { search, origin, startDate, endDate } = req.query;
+    const { error, parts } = buildDocumentListParts({ origin, search, startDate, endDate });
+    if (error) {
+      return res.status(400).json({ success: false, error });
     }
-    
+
+    const query = andFilters(tenantFilter(req), ...parts);
     const documents = await Document.find(query).sort({ signedAt: -1 });
     
     res.json({
@@ -63,62 +80,110 @@ async function createDocument(req, res, next) {
       userName,
       userEmail,
       observations,
+      title,
+      origin: originRaw,
+      templateId: templateIdRaw,
+      signedAt: signedAtRaw,
       clientId,
       saleId,
       procedureId,
     } = req.body;
-    
-    // Se houver arquivo no upload, processar
-    let finalFileUrl = fileUrl;
-    let finalSignatureUrl = signatureUrl;
-    
-    if (req.file) {
-      // Se foi feito upload para S3, usar a location (URL pública) do arquivo
-      // req.file.location contém a URL pública do arquivo no S3
-      const s3Url = req.file.location;
-      finalFileUrl = s3Url;
-      
-      // Se signatureUrl não foi fornecido, usar a mesma URL do arquivo
-      if (!finalSignatureUrl) {
-        finalSignatureUrl = s3Url;
+
+    const origin = normalizeOrigin(originRaw);
+    if (!origin) {
+      return res.status(400).json({ success: false, error: 'origin inválido' });
+    }
+
+    const signedAt = parseSignedAt(signedAtRaw);
+    if (signedAtRaw && signedAt === null) {
+      return res.status(400).json({ success: false, error: 'Data da assinatura inválida' });
+    }
+
+    const clientObjectId = toOptionalObjectId(clientId);
+    const scanError = physicalScanError({
+      origin,
+      clientId: clientObjectId,
+      signedAt,
+    });
+    if (scanError) {
+      return res.status(400).json({ success: false, error: scanError });
+    }
+
+    let client = null;
+    if (clientObjectId) {
+      client = await Client.findOne({ _id: clientObjectId, ...tenantFilter(req) });
+      if (!client) {
+        return res.status(400).json({ success: false, error: 'Paciente não encontrado' });
       }
-      
-      // Se não foi fornecido, usar o nome do arquivo do upload
+    }
+
+    const signer = resolveSignerFields({
+      origin,
+      client,
+      userName,
+      userEmail,
+    });
+    const signerError = digitalSignatureError({
+      origin,
+      userName: signer.userName,
+      userEmail: signer.userEmail,
+      clientId: clientObjectId,
+    });
+    if (signerError) {
+      return res.status(400).json({ success: false, error: signerError });
+    }
+
+    const templateId = toOptionalObjectId(templateIdRaw);
+    if (templateId) {
+      const template = await DocumentTemplate.findOne({ _id: templateId, ...tenantFilter(req) });
+      if (!template) {
+        return res.status(400).json({ success: false, error: 'Modelo não encontrado' });
+      }
+    }
+
+    const { fileUrl: finalFileUrl, signatureUrl: finalSignatureUrl } = resolveStoredDocumentUrls({
+      uploadedLocation: req.file && req.file.location,
+      fileUrl,
+      signatureUrl,
+    });
+
+    if (req.file) {
       if (!fileName) {
         fileName = req.file.originalname;
       }
-      // Se não foi fornecido, usar o tipo do arquivo do upload
       if (!fileType) {
         fileType = req.file.mimetype;
       }
     }
-    
-    // Se não houver fileUrl e não houver arquivo, retornar erro
+
     if (!finalFileUrl) {
       return res.status(400).json({
         success: false,
         error: 'fileUrl ou arquivo é obrigatório'
       });
     }
-    
-    // Validar que signatureUrl foi fornecido
+
     if (!finalSignatureUrl) {
       return res.status(400).json({
         success: false,
         error: 'signatureUrl é obrigatório'
       });
     }
-    
+
     const document = new Document({
-      userId: req.userId,
+      ...tenantCreateFields(req),
       fileName,
       fileType,
       fileUrl: finalFileUrl,
       signatureUrl: finalSignatureUrl,
-      userName,
-      userEmail,
+      userName: signer.userName,
+      userEmail: signer.userEmail,
+      title: title && String(title).trim() ? String(title).trim() : undefined,
+      origin,
+      templateId,
       observations: observations || undefined,
-      clientId: toOptionalObjectId(clientId),
+      signedAt: signedAt || undefined,
+      clientId: clientObjectId,
       saleId: toOptionalObjectId(saleId),
       procedureId: toOptionalObjectId(procedureId),
       status: 'Assinado'
@@ -129,7 +194,7 @@ async function createDocument(req, res, next) {
     res.status(201).json({
       success: true,
       data: formatDocument(document),
-      message: 'Documento salvo com sucesso'
+      message: origin === 'physical_scan' ? 'Ficha física salva com sucesso' : 'Documento salvo com sucesso'
     });
   } catch (error) {
     next(error);
@@ -148,8 +213,7 @@ async function downloadDocument(req, res, next) {
     }
     
     const document = await Document.findOne({
-      _id: id,
-      userId: req.userId
+      _id: id, ...tenantFilter(req)
     });
     
     if (!document) {
@@ -159,40 +223,38 @@ async function downloadDocument(req, res, next) {
       });
     }
     
-    // Se for URL do S3 ou URL externa, redirecionar
-    if (document.signatureUrl && (document.signatureUrl.startsWith('http://') || document.signatureUrl.startsWith('https://'))) {
-      // Redirecionar para URL do S3 ou URL externa
-      res.redirect(document.signatureUrl);
-    } else if (document.signatureUrl && document.signatureUrl.startsWith('/uploads/')) {
-      // Mantém compatibilidade com uploads locais antigos (fallback)
+    const downloadUrl = resolveDownloadUrl(document);
+    if (downloadUrl) {
+      res.redirect(downloadUrl);
+      return;
+    }
+
+    const storedUrl = document.signatureUrl || document.fileUrl || '';
+    if (storedUrl.startsWith('/uploads/')) {
       return res.status(404).json({
         success: false,
         error: 'Arquivo não disponível. Este arquivo foi armazenado localmente e não está mais acessível.'
       });
-    } else {
-      return res.status(404).json({
-        success: false,
-        error: 'URL do documento não encontrada'
-      });
     }
+
+    return res.status(404).json({
+      success: false,
+      error: 'URL do documento não encontrada'
+    });
   } catch (error) {
     next(error);
   }
 }
 
-// Função auxiliar para extrair a key do S3 a partir da URL
-function extractS3KeyFromUrl(url) {
-  if (!url || typeof url !== 'string') return null;
-  
-  try {
-    // Se for URL do S3, extrair a key
-    // Exemplo: https://gerenciei-documentos.s3.us-east-1.amazonaws.com/documents/1234567890-987654321.pdf
-    const s3UrlPattern = /https?:\/\/[^\/]+\/(.+)$/;
-    const match = url.match(s3UrlPattern);
-    return match ? match[1] : null;
-  } catch (error) {
-    return null;
-  }
+async function deleteS3IfPresent(url) {
+  if (!isS3Available() || !s3Client) return;
+  if (!url || !url.includes('amazonaws.com')) return;
+  const s3Key = extractS3ObjectKey(url);
+  if (!s3Key || isTemplateObjectKey(s3Key)) return;
+  await s3Client.send(new DeleteObjectCommand({
+    Bucket: BUCKET_NAME,
+    Key: s3Key,
+  }));
 }
 
 async function deleteDocument(req, res, next) {
@@ -206,10 +268,8 @@ async function deleteDocument(req, res, next) {
       });
     }
     
-    // Buscar documento
     const document = await Document.findOne({
-      _id: id,
-      userId: req.userId
+      _id: id, ...tenantFilter(req)
     });
     
     if (!document) {
@@ -219,47 +279,15 @@ async function deleteDocument(req, res, next) {
       });
     }
     
-    // Tentar deletar arquivo do S3 se estiver lá
-    if (isS3Available() && s3Client) {
-      try {
-        // Verificar se signatureUrl é uma URL do S3
-        if (document.signatureUrl && document.signatureUrl.includes('amazonaws.com')) {
-          const s3Key = extractS3KeyFromUrl(document.signatureUrl);
-          
-          if (s3Key) {
-            const deleteCommand = new DeleteObjectCommand({
-              Bucket: BUCKET_NAME,
-              Key: s3Key
-            });
-            
-            await s3Client.send(deleteCommand);
-            console.log(`Arquivo deletado do S3: ${s3Key}`);
-          }
-        }
-        
-        // Também deletar fileUrl se for diferente do signatureUrl
-        if (document.fileUrl && document.fileUrl.includes('amazonaws.com') && document.fileUrl !== document.signatureUrl) {
-          const fileS3Key = extractS3KeyFromUrl(document.fileUrl);
-          
-          if (fileS3Key) {
-            const deleteCommand = new DeleteObjectCommand({
-              Bucket: BUCKET_NAME,
-              Key: fileS3Key
-            });
-            
-            await s3Client.send(deleteCommand);
-            console.log(`Arquivo deletado do S3: ${fileS3Key}`);
-          }
-        }
-      } catch (s3Error) {
-        // Log do erro mas continua para deletar do banco mesmo assim
-        console.error('Erro ao deletar arquivo do S3 (continuando com delete do banco):', s3Error.message);
+    try {
+      await deleteS3IfPresent(document.signatureUrl);
+      if (document.fileUrl && document.fileUrl !== document.signatureUrl) {
+        await deleteS3IfPresent(document.fileUrl);
       }
-    } else {
-      console.warn('⚠️ S3 não disponível. Arquivo não deletado do S3.');
+    } catch (s3Error) {
+      console.error('Erro ao deletar arquivo do S3 (continuando com delete do banco):', s3Error.message);
     }
     
-    // Deletar documento do banco de dados
     await Document.findByIdAndDelete(id);
     
     res.json({
@@ -275,6 +303,6 @@ module.exports = {
   getAllDocuments,
   createDocument,
   downloadDocument,
-  deleteDocument
+  deleteDocument,
+  formatDocument,
 };
-

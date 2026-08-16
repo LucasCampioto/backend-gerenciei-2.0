@@ -80,4 +80,12 @@ describe('planEntitlements', () => {
       else process.env.SUBSCRIPTION_BYPASS_USER_IDS = prev;
     }
   });
+
+  it('seatLimitForPlanTier matches pricing (além do dono)', () => {
+    const { seatLimitForPlanTier } = require('./planEntitlements');
+    assert.equal(seatLimitForPlanTier('gestao'), 0);
+    assert.equal(seatLimitForPlanTier('profissional'), 3);
+    assert.equal(seatLimitForPlanTier('enterprise'), null);
+    assert.equal(seatLimitForPlanTier('legado'), null);
+  });
 });

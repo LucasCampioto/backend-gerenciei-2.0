@@ -1,3 +1,4 @@
+const { tenantFilter, tenantCreateFields, scopeUserId } = require('../utils/tenantScope');
 const mongoose = require('mongoose');
 const Sale = require('../models/Sale');
 const Expense = require('../models/Expense');
@@ -309,7 +310,7 @@ function buildInsights({
 
 async function getBusinessHealth(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const { startDate, endDate } = req.query;
 
     let currentRange;
@@ -373,7 +374,7 @@ async function getBusinessHealth(req, res, next) {
       taxaRecorrencia,
     });
 
-    const closingQueue = await buildClosingQueue(req.userId, { refresh: false }).catch(() => ({
+    const closingQueue = await buildClosingQueue(scopeUserId(req), { refresh: false }).catch(() => ({
       items: [],
       count: 0,
       totalExpectedValue: 0,
@@ -408,7 +409,7 @@ async function getBusinessHealth(req, res, next) {
     };
 
     // Lê briefing do cache diário (mesmo da Home). Sem LLM no request.
-    const directorCache = await aiDailyCache.getDaily(req.userId, 'director');
+    const directorCache = await aiDailyCache.getDaily(scopeUserId(req), 'director');
     let director = directorCache?.payload || null;
     if (!director) {
       director = {
@@ -428,7 +429,7 @@ async function getBusinessHealth(req, res, next) {
       };
 
       setImmediate(() => {
-        runDailyAiAnalyses(req.userId, { directorFacts }).catch((err) => {
+        runDailyAiAnalyses(scopeUserId(req), { directorFacts }).catch((err) => {
           console.warn('[businessHealth] daily AI skipped:', err.message);
         });
       });

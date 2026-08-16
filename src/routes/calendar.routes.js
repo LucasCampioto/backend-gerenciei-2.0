@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getCalendarEvents, getCalendars } = require('../controllers/calendar.controller');
+const { getCalendarEvents, getCalendars, getTeamCalendarMembers, getTeamCalendarEvents } = require('../controllers/calendar.controller');
 const {
   initiateOAuth,
   handleOAuthCallback,
@@ -15,6 +15,7 @@ const {
   listNoShows,
 } = require('../controllers/calendarNoShow.controller');
 const { authenticate } = require('../middleware/auth.middleware');
+const { requireOrgAdmin } = require('../middleware/orgAuth.middleware');
 
 // Rotas OAuth (callback não precisa de autenticação, mas valida state)
 router.get('/oauth/callback', handleOAuthCallback);
@@ -34,6 +35,10 @@ router.get('/calendars', getCalendars);
 
 // Rota para buscar eventos/agendamentos
 router.get('/events', getCalendarEvents);
+
+// Agenda agregada da equipe (owner/admin)
+router.get('/team/members', requireOrgAdmin, getTeamCalendarMembers);
+router.get('/team/events', requireOrgAdmin, getTeamCalendarEvents);
 
 // No-show (não compareceu)
 router.get('/no-shows', listNoShows);

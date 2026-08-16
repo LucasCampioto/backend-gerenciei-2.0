@@ -1,3 +1,9 @@
+const {
+  scopeUserId,
+  actorScopedTenantFilter,
+  andFilters,
+  isOrgAdminRequest,
+} = require('../utils/tenantScope');
 const mongoose = require('mongoose');
 const Sale = require('../models/Sale');
 const User = require('../models/User');
@@ -62,14 +68,23 @@ function formatBRL(value) {
   return Number(value || 0).toFixed(2).replace('.', ',');
 }
 
-async function aggregateSalesForRange(userObjectId, start, end) {
+async function aggregateSalesForRange(req, start, end, createdByUserIdFilter = null) {
+  const clauses = [
+    actorScopedTenantFilter(req),
+    { createdAt: { $gte: start, $lte: end } },
+  ];
+  if (
+    isOrgAdminRequest(req) &&
+    createdByUserIdFilter &&
+    mongoose.Types.ObjectId.isValid(createdByUserIdFilter)
+  ) {
+    clauses.push({
+      createdByUserId: new mongoose.Types.ObjectId(createdByUserIdFilter),
+    });
+  }
+
   const rows = await Sale.aggregate([
-    {
-      $match: {
-        userId: userObjectId,
-        createdAt: { $gte: start, $lte: end },
-      },
-    },
+    { $match: andFilters(...clauses) },
     {
       $group: {
         _id: null,
@@ -88,6 +103,45 @@ async function aggregateSalesForRange(userObjectId, start, end) {
     totalValue: rows[0]?.totalValue ?? 0,
     clientsCount: clientIds.length,
   };
+}
+
+/** Breakdown por quem registrou — só faz sentido para admin/owner. */
+async function aggregateSalesByCreator(req, start, end) {
+  if (!isOrgAdminRequest(req)) return [];
+
+  const rows = await Sale.aggregate([
+    {
+      $match: andFilters(actorScopedTenantFilter(req), {
+        createdAt: { $gte: start, $lte: end },
+      }),
+    },
+    {
+      $group: {
+        _id: '$createdByUserId',
+        count: { $sum: 1 },
+        netValue: { $sum: '$netValue' },
+        totalValue: { $sum: '$totalValue' },
+      },
+    },
+    { $sort: { netValue: -1 } },
+  ]);
+
+  const ids = rows.map((r) => r._id).filter(Boolean);
+  const users = ids.length
+    ? await User.find({ _id: { $in: ids } }).select('name').lean()
+    : [];
+  const nameById = new Map(users.map((u) => [String(u._id), u.name]));
+
+  return rows.map((r) => {
+    const id = r._id ? String(r._id) : null;
+    return {
+      createdByUserId: id,
+      createdByName: id ? nameById.get(id) || 'Usuário' : 'Sem registro',
+      count: r.count || 0,
+      netValue: r.netValue || 0,
+      totalValue: r.totalValue || 0,
+    };
+  });
 }
 
 function buildBriefingItems({
@@ -186,7 +240,6 @@ async function loadTodayEvents(user) {
 
 async function getDailyHome(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
     const todayStart = startOfDay();
     const todayEnd = endOfDay();
     const yDay = clinicYesterday();
@@ -198,6 +251,11 @@ async function getDailyHome(req, res, next) {
     const todayKey = formatDateKey();
     const yesterdayKey = formatDateKey(yDay);
     const weekStartKey = formatDateKey(weekStart);
+    const createdByFilter =
+      typeof req.query?.createdByUserId === 'string'
+        ? req.query.createdByUserId.trim()
+        : null;
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
 
     const user = await User.findById(req.userId)
       .select('googleCalendarConnected googleCalendarId name')
@@ -211,25 +269,29 @@ async function getDailyHome(req, res, next) {
       yesterdaySales,
       weekSales,
       prevWeekSales,
+      todaySalesByCreator,
+      weekSalesByCreator,
       directorCache,
       upsellsCache,
       closingRankCache,
     ] = await Promise.all([
       loadTodayEvents({ ...user, _id: req.userId }),
-      buildActionQueue(req.userId).catch(() => ({ items: [], dueReturnsCount: 0 })),
-      aggregateSalesForRange(userObjectId, todayStart, todayEnd),
-      aggregateSalesForRange(userObjectId, yesterdayStart, yesterdayEnd),
-      aggregateSalesForRange(userObjectId, weekStart, todayEnd),
-      aggregateSalesForRange(userObjectId, prevWeekStart, prevWeekEnd),
-      aiDailyCache.getDaily(req.userId, 'director'),
-      aiDailyCache.getDaily(req.userId, 'upsells'),
-      aiDailyCache.getDaily(req.userId, 'closing_rank'),
+      buildActionQueue(scopeUserId(req)).catch(() => ({ items: [], dueReturnsCount: 0 })),
+      aggregateSalesForRange(req, todayStart, todayEnd, createdByFilter),
+      aggregateSalesForRange(req, yesterdayStart, yesterdayEnd, createdByFilter),
+      aggregateSalesForRange(req, weekStart, todayEnd, createdByFilter),
+      aggregateSalesForRange(req, prevWeekStart, prevWeekEnd, createdByFilter),
+      aggregateSalesByCreator(req, todayStart, todayEnd),
+      aggregateSalesByCreator(req, weekStart, todayEnd),
+      aiDailyCache.getDaily(scopeUserId(req), 'director'),
+      aiDailyCache.getDaily(scopeUserId(req), 'upsells'),
+      aiDailyCache.getDaily(scopeUserId(req), 'closing_rank'),
     ]);
 
     let { todayEvents, calendarConnected } = calendarResult;
 
     // Sempre sincroniza regras/valores (sem LLM). Ranking Agno só no job diário.
-    const closingQueue = await buildClosingQueue(req.userId, {
+    const closingQueue = await buildClosingQueue(scopeUserId(req), {
       refresh: true,
       ruleQueue,
       runAiRank: false,
@@ -257,7 +319,7 @@ async function getDailyHome(req, res, next) {
     // Eventos sem item no cache são recalculados (ex.: match "contém" no catálogo).
     let appointmentUpsells = upsellsCache?.payload?.items || [];
     if (!upsellsCache?.payload) {
-      appointmentUpsells = await buildAppointmentUpsells(req.userId, todayEvents, {
+      appointmentUpsells = await buildAppointmentUpsells(scopeUserId(req), todayEvents, {
         skipCache: true,
         useAi: false,
       }).catch(() => []);
@@ -265,7 +327,7 @@ async function getDailyHome(req, res, next) {
       const covered = new Set(appointmentUpsells.map((item) => item.eventId));
       const missingEvents = todayEvents.filter((event) => !covered.has(event.id));
       if (missingEvents.length) {
-        const extra = await buildAppointmentUpsells(req.userId, missingEvents, {
+        const extra = await buildAppointmentUpsells(scopeUserId(req), missingEvents, {
           skipCache: true,
           useAi: false,
         }).catch(() => []);
@@ -347,10 +409,10 @@ async function getDailyHome(req, res, next) {
     let whatsappCampaigns = { dateKey: todayKey, pendingCount: 0, items: [] };
     try {
       // Sempre via IA; troca pending legado (rule_fallback) por campanhas do Agno.
-      whatsappCampaigns = await campaignService.ensureAgentDailyCampaigns(req.userId);
+      whatsappCampaigns = await campaignService.ensureAgentDailyCampaigns(scopeUserId(req));
       if (whatsappCampaigns.pendingCount) {
         await aiDailyCache
-          .saveDaily(req.userId, 'wa_campaigns', {
+          .saveDaily(scopeUserId(req), 'wa_campaigns', {
             payload: {
               dateKey: whatsappCampaigns.dateKey,
               count: whatsappCampaigns.pendingCount,
@@ -377,10 +439,12 @@ async function getDailyHome(req, res, next) {
           netValue: todaySales.netValue,
           totalValue: todaySales.totalValue,
         },
+        todaySalesByCreator,
         yesterdaySales: {
           count: yesterdaySales.count,
           netValue: yesterdaySales.netValue,
         },
+        salesVisibility: isOrgAdminRequest(req) ? 'organization' : 'own',
         actionQueue: (closingQueue.items.length ? closingQueue.items : ruleQueue.items).slice(0, 8),
         actionQueueCount: closingQueue.count || ruleQueue.items.length,
         dueReturnsCount: ruleQueue.dueReturnsCount,
@@ -403,6 +467,7 @@ async function getDailyHome(req, res, next) {
             Math.round((weekSales.netValue - prevWeekSales.netValue) * 100) / 100,
           dueReturnsCount: ruleQueue.dueReturnsCount || 0,
           closingQueueCount: closingQueue.count || 0,
+          byCreator: weekSalesByCreator,
         },
         briefing: {
           date: todayKey,
@@ -417,21 +482,21 @@ async function getDailyHome(req, res, next) {
           closingRank: Boolean(closingRankCache?.payload),
           director: Boolean(directorCache?.payload),
           upsells: Boolean(upsellsCache?.payload),
-          waCampaigns: Boolean((await aiDailyCache.getDaily(req.userId, 'wa_campaigns').catch(() => null))?.payload)
+          waCampaigns: Boolean((await aiDailyCache.getDaily(scopeUserId(req), 'wa_campaigns').catch(() => null))?.payload)
             || whatsappCampaigns.pendingCount > 0,
         },
       },
     });
 
     // Primeira abertura do dia: dispara análises de IA em background.
-    const waCampaignsCache = await aiDailyCache.getDaily(req.userId, 'wa_campaigns').catch(() => null);
+    const waCampaignsCache = await aiDailyCache.getDaily(scopeUserId(req), 'wa_campaigns').catch(() => null);
     const needsDailyAi = !closingRankCache?.payload
       || !directorCache?.payload
       || !upsellsCache?.payload
       || !waCampaignsCache?.payload;
     if (needsDailyAi) {
       setImmediate(() => {
-        runDailyAiAnalyses(req.userId, {
+        runDailyAiAnalyses(scopeUserId(req), {
           todayEvents,
           directorFacts,
         }).catch((err) => {

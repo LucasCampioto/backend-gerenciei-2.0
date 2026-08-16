@@ -5,6 +5,7 @@ const CampaignLead = require('../models/CampaignLead');
 const mongoose = require('mongoose');
 const { logActivity } = require('../services/clientActivity.service');
 const { recordClientPhotoConsent } = require('../services/simulation/clientPhotoConsent');
+const { tenantFilter, tenantDocFilter, tenantCreateFields, scopeUserId } = require('../utils/tenantScope');
 const {
   findClientByPhone,
   isValidBrazilianPhone,
@@ -41,7 +42,7 @@ function formatClient(client) {
 async function getAllClients(req, res, next) {
   try {
     const { category } = req.query;
-    const query = { userId: req.userId };
+    const query = { ...tenantFilter(req) };
 
     if (category && ['lead', 'cliente'].includes(category)) {
       query.category = category;
@@ -70,7 +71,7 @@ async function createClient(req, res, next) {
     }
 
     const phoneDigits = stripPhoneDigits(phone);
-    const duplicate = await findClientByPhone(Client, req.userId, phoneDigits);
+    const duplicate = await findClientByPhone(Client, scopeUserId(req), phoneDigits);
     if (duplicate) {
       return res.status(409).json({
         success: false,
@@ -80,7 +81,7 @@ async function createClient(req, res, next) {
     }
 
     const client = new Client({
-      userId: req.userId,
+      ...tenantCreateFields(req),
       name,
       phone: phoneDigits,
       category: category || 'lead',
@@ -95,7 +96,7 @@ async function createClient(req, res, next) {
     await client.save();
 
     await logActivity({
-      userId: req.userId,
+      ...tenantCreateFields(req),
       clientId: client._id,
       clientName: client.name,
       type: 'initial_group',
@@ -125,7 +126,7 @@ async function updateClient(req, res, next) {
       });
     }
 
-    const existing = await Client.findOne({ _id: id, userId: req.userId });
+    const existing = await Client.findOne({ _id: id, ...tenantFilter(req) });
 
     if (!existing) {
       return res.status(404).json({
@@ -142,7 +143,7 @@ async function updateClient(req, res, next) {
     }
 
     const phoneDigits = stripPhoneDigits(phone);
-    const duplicate = await findClientByPhone(Client, req.userId, phoneDigits);
+    const duplicate = await findClientByPhone(Client, scopeUserId(req), phoneDigits);
     if (duplicate && String(duplicate._id) !== String(existing._id)) {
       return res.status(409).json({
         success: false,
@@ -164,7 +165,7 @@ async function updateClient(req, res, next) {
 
     if (clientGroup !== undefined && clientGroup !== existing.clientGroup) {
       await logActivity({
-        userId: req.userId,
+        ...tenantCreateFields(req),
         clientId: existing._id,
         clientName: existing.name,
         type: 'group_change',
@@ -176,7 +177,7 @@ async function updateClient(req, res, next) {
 
     if (noReturnReason !== undefined && noReturnReason !== existing.noReturnReason) {
       await logActivity({
-        userId: req.userId,
+        ...tenantCreateFields(req),
         clientId: existing._id,
         clientName: existing.name,
         type: 'reason_update',
@@ -203,7 +204,7 @@ async function updateClient(req, res, next) {
     }
 
     const client = await Client.findOneAndUpdate(
-      { _id: id, userId: req.userId },
+      { _id: id, ...tenantFilter(req) },
       updateData,
       { new: true, runValidators: true }
     );
@@ -230,8 +231,7 @@ async function deleteClient(req, res, next) {
     }
 
     const client = await Client.findOneAndDelete({
-      _id: id,
-      userId: req.userId
+      _id: id, ...tenantFilter(req)
     });
 
     if (!client) {
@@ -242,16 +242,16 @@ async function deleteClient(req, res, next) {
     }
 
     const campaignLeads = await CampaignLead.find({
-      userId: req.userId,
+      ...tenantCreateFields(req),
       clientId: client._id,
     }).select('campaignId');
 
     await ClientActivity.deleteMany({
-      userId: req.userId,
+      ...tenantCreateFields(req),
       clientId: client._id,
     });
     await CampaignLead.deleteMany({
-      userId: req.userId,
+      ...tenantCreateFields(req),
       clientId: client._id,
     });
 
@@ -260,7 +260,7 @@ async function deleteClient(req, res, next) {
     ];
     if (campaignIds.length) {
       await Campaign.updateMany(
-        { _id: { $in: campaignIds }, userId: req.userId, leadsCount: { $gt: 0 } },
+        { _id: { $in: campaignIds }, ...tenantFilter(req), leadsCount: { $gt: 0 } },
         { $inc: { leadsCount: -1 } }
       );
     }
@@ -277,7 +277,7 @@ async function deleteClient(req, res, next) {
 async function recordPhotoConsent(req, res, next) {
   try {
     const { consentVersion } = req.body || {};
-    const result = await recordClientPhotoConsent(req.userId, req.params.id, { consentVersion });
+    const result = await recordClientPhotoConsent(scopeUserId(req), req.params.id, { consentVersion });
     if (result.error) {
       return res.status(result.status || 400).json({
         success: false,

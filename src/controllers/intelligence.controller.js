@@ -1,3 +1,4 @@
+const { tenantFilter, tenantCreateFields, scopeUserId } = require('../utils/tenantScope');
 const {
   qualifyClient,
   suggestOffer,
@@ -18,7 +19,7 @@ const mongoose = require('mongoose');
 
 async function qualify(req, res, next) {
   try {
-    const data = await qualifyClient(req.userId, req.params.clientId, {
+    const data = await qualifyClient(scopeUserId(req), req.params.clientId, {
       force: req.body?.force !== false,
     });
     res.json({ success: true, data });
@@ -32,7 +33,7 @@ async function qualify(req, res, next) {
 
 async function offer(req, res, next) {
   try {
-    const data = await suggestOffer(req.userId, req.params.clientId, {
+    const data = await suggestOffer(scopeUserId(req), req.params.clientId, {
       force: Boolean(req.body?.force),
     });
     res.json({ success: true, data });
@@ -47,7 +48,7 @@ async function offer(req, res, next) {
 async function objection(req, res, next) {
   try {
     const data = await suggestObjectionScript(
-      req.userId,
+      scopeUserId(req),
       req.params.clientId,
       req.body?.objectionText || ''
     );
@@ -62,7 +63,7 @@ async function objection(req, res, next) {
 
 async function conversation(req, res, next) {
   try {
-    const data = await suggestConversationCoach(req.userId, req.params.clientId, {
+    const data = await suggestConversationCoach(scopeUserId(req), req.params.clientId, {
       mode: req.body?.mode,
       force: Boolean(req.body?.force),
     });
@@ -77,7 +78,7 @@ async function conversation(req, res, next) {
 
 async function approveJourney(req, res, next) {
   try {
-    const data = await approveJourneyPlan(req.userId, req.params.clientId);
+    const data = await approveJourneyPlan(scopeUserId(req), req.params.clientId);
     res.json({ success: true, data });
   } catch (error) {
     if (error.statusCode === 404 || error.statusCode === 400) {
@@ -89,7 +90,7 @@ async function approveJourney(req, res, next) {
 
 async function advanceJourney(req, res, next) {
   try {
-    const data = await advanceClientJourney(req.userId, req.params.clientId);
+    const data = await advanceClientJourney(scopeUserId(req), req.params.clientId);
     res.json({ success: true, data });
   } catch (error) {
     if (error.statusCode === 404 || error.statusCode === 400) {
@@ -105,7 +106,7 @@ async function moveJourney(req, res, next) {
     if (!nodeId) {
       return res.status(400).json({ success: false, error: 'nodeId é obrigatório' });
     }
-    const data = await moveClientJourneyToNode(req.userId, req.params.clientId, nodeId);
+    const data = await moveClientJourneyToNode(scopeUserId(req), req.params.clientId, nodeId);
     res.json({ success: true, data });
   } catch (error) {
     if (error.statusCode === 404 || error.statusCode === 400) {
@@ -125,8 +126,8 @@ async function closingQueue(req, res, next) {
       runDailyAiAnalyses,
     } = require('../services/commercialIntelligence.service');
 
-    const closingRankCache = await aiDailyCache.getDaily(req.userId, 'closing_rank');
-    const data = await buildClosingQueue(req.userId, {
+    const closingRankCache = await aiDailyCache.getDaily(scopeUserId(req), 'closing_rank');
+    const data = await buildClosingQueue(scopeUserId(req), {
       refresh: refresh || !closingRankCache?.payload,
       runAiRank: false,
     });
@@ -134,7 +135,7 @@ async function closingQueue(req, res, next) {
 
     if (!closingRankCache?.payload) {
       setImmediate(() => {
-        runDailyAiAnalyses(req.userId, {
+        runDailyAiAnalyses(scopeUserId(req), {
           directorFacts: {
             queueCount: data.count,
             revenueAtRisk: data.totalExpectedValue,
@@ -154,7 +155,7 @@ async function closingQueue(req, res, next) {
 async function director(req, res, next) {
   try {
     const aiDailyCache = require('../services/aiDailyCache.service');
-    const cached = await aiDailyCache.getDaily(req.userId, 'director');
+    const cached = await aiDailyCache.getDaily(scopeUserId(req), 'director');
     if (cached?.payload) {
       return res.json({
         success: true,
@@ -162,15 +163,15 @@ async function director(req, res, next) {
       });
     }
 
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const todayEnd = new Date();
     todayEnd.setHours(23, 59, 59, 999);
 
     const [queue, ruleQueue, todayAgg] = await Promise.all([
-      buildClosingQueue(req.userId, { refresh: false }),
-      buildActionQueue(req.userId).catch(() => ({ items: [], dueReturnsCount: 0 })),
+      buildClosingQueue(scopeUserId(req), { refresh: false }),
+      buildActionQueue(scopeUserId(req)).catch(() => ({ items: [], dueReturnsCount: 0 })),
       Sale.aggregate([
         {
           $match: {
@@ -225,7 +226,7 @@ async function director(req, res, next) {
 
     const { runDailyAiAnalyses } = require('../services/commercialIntelligence.service');
     setImmediate(() => {
-      runDailyAiAnalyses(req.userId, { directorFacts: facts }).catch(() => {});
+      runDailyAiAnalyses(scopeUserId(req), { directorFacts: facts }).catch(() => {});
     });
   } catch (error) {
     next(error);
@@ -234,7 +235,7 @@ async function director(req, res, next) {
 
 async function prepareLead(req, res, next) {
   try {
-    const data = await prepareLeadBundle(req.userId, req.params.clientId);
+    const data = await prepareLeadBundle(scopeUserId(req), req.params.clientId);
     res.json({ success: true, data });
   } catch (error) {
     if (error.statusCode === 404) {
@@ -246,7 +247,7 @@ async function prepareLead(req, res, next) {
 
 async function getContext(req, res, next) {
   try {
-    const data = await loadClientContext(req.userId, req.params.clientId);
+    const data = await loadClientContext(scopeUserId(req), req.params.clientId);
     if (!data) {
       return res.status(404).json({ success: false, error: 'Cliente não encontrado' });
     }
@@ -275,7 +276,7 @@ async function agnoStatus(req, res, next) {
 async function learning(req, res, next) {
   try {
     const days = Number(req.query.days) || 30;
-    const data = await getLearningSignals(req.userId, { days });
+    const data = await getLearningSignals(scopeUserId(req), { days });
     res.json({ success: true, data });
   } catch (error) {
     next(error);
@@ -287,7 +288,7 @@ async function reactivationTargets(req, res, next) {
     const {
       collectReactivationTargets,
     } = require('../services/reactivation.service');
-    const targets = await collectReactivationTargets(req.userId);
+    const targets = await collectReactivationTargets(scopeUserId(req));
     res.json({ success: true, data: { targets } });
   } catch (error) {
     next(error);
@@ -297,7 +298,7 @@ async function reactivationTargets(req, res, next) {
 async function reactivationGenerate(req, res, next) {
   try {
     const { generateReactivationCampaign } = require('../services/reactivation.service');
-    const data = await generateReactivationCampaign(req.userId);
+    const data = await generateReactivationCampaign(scopeUserId(req));
     res.json({ success: true, data });
   } catch (error) {
     next(error);
@@ -308,7 +309,7 @@ async function reactivationContacted(req, res, next) {
   try {
     const { markReactivationContacted } = require('../services/reactivation.service');
     const data = await markReactivationContacted(
-      req.userId,
+      scopeUserId(req),
       req.params.clientId,
       req.body?.note
     );

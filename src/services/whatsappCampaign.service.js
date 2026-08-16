@@ -8,11 +8,57 @@ const Campaign = require('../models/Campaign');
 const WhatsAppSettings = require('../models/WhatsAppSettings');
 const outbox = require('./whatsappOutbox.service');
 const agno = require('./agno.client');
-const { stripPhoneDigits } = require('../utils/phoneMatch');
+const { stripPhoneDigits, isValidBrazilianPhone, findClientByPhone } = require('../utils/phoneMatch');
 
 const CLINIC_TZ = 'America/Sao_Paulo';
 const MAX_LEADS = WhatsAppCampaign.MAX_LEADS_PER_CAMPAIGN || 30;
 const OBJECTIVES = WhatsAppCampaign.OBJECTIVES;
+
+function newLeadId() {
+  return `lead-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function resolveLeadClientId(item) {
+  const raw = item?.clientId || '';
+  if (raw && mongoose.Types.ObjectId.isValid(String(raw)) && String(raw).length === 24) {
+    return String(raw);
+  }
+  return null;
+}
+
+/** Lista de disparo: nome + telefone válidos, sem duplicar dígitos, até MAX_LEADS. */
+function normalizeCampaignLeads(raw, { max = MAX_LEADS } = {}) {
+  const out = [];
+  const seen = new Set();
+  for (const item of Array.isArray(raw) ? raw : []) {
+    const name = String(item?.name || '').trim().slice(0, 80);
+    const phone = String(item?.phone || '').trim();
+    const digits = stripPhoneDigits(phone);
+    if (!name || !isValidBrazilianPhone(phone)) continue;
+    const key = digits.slice(-11);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const clientId = resolveLeadClientId(item);
+    const idRaw = String(item?.id || '').trim();
+    out.push({
+      id: idRaw || clientId || newLeadId(),
+      clientId,
+      name,
+      phone,
+    });
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+function publicClientsFromLeads(leads) {
+  return (leads || []).map((lead) => ({
+    id: String(lead.id || lead.clientId || ''),
+    name: lead.name,
+    phone: lead.phone,
+    clientId: lead.clientId ? String(lead.clientId) : null,
+  }));
+}
 
 function todayKeySp(date = new Date()) {
   return new Intl.DateTimeFormat('en-CA', {
@@ -626,7 +672,7 @@ function serializeCampaignSummary(doc) {
     title: obj.title,
     reason: obj.reason,
     audienceSummary: obj.audienceSummary,
-    leadCount: (obj.clientIds || []).length,
+    leadCount: (obj.leads && obj.leads.length ? obj.leads : obj.clientIds || []).length,
     suggestedSendAt: obj.suggestedSendAt,
     source: obj.source,
     stats: obj.stats,
@@ -662,17 +708,22 @@ async function getCampaignDetail(userId, campaignId) {
 
   const dispatches = await outbox.listCampaignDispatches(userId, campaignId);
 
+  const snapshot = Array.isArray(doc.leads) && doc.leads.length
+    ? publicClientsFromLeads(doc.leads)
+    : clients.map((c) => ({
+        id: String(c._id),
+        name: c.name,
+        phone: c.phone,
+        clientId: String(c._id),
+        category: c.category,
+        pipelineStage: c.pipelineStage,
+      }));
+
   return {
     ...serializeCampaignSummary(doc),
     messageVariants: doc.messageVariants,
     audienceRule: doc.audienceRule,
-    clients: clients.map((c) => ({
-      id: String(c._id),
-      name: c.name,
-      phone: c.phone,
-      category: c.category,
-      pipelineStage: c.pipelineStage,
-    })),
+    clients: snapshot,
     dispatches,
     approvedAt: doc.approvedAt,
     rejectedAt: doc.rejectedAt,
@@ -683,6 +734,7 @@ async function approveCampaign(userId, campaignId, {
   variantId,
   sendAt,
   editedMessages,
+  leads: incomingLeads,
 } = {}) {
   const settings = await WhatsAppSettings.findOne({ userId }).lean();
   if (!settings || settings.status !== 'connected') {
@@ -729,36 +781,68 @@ async function approveCampaign(userId, campaignId, {
     if (!Number.isNaN(parsed.getTime())) doc.suggestedSendAt = parsed;
   }
 
-  // Revalida audiência no approve
-  const validIds = await validateClientIds(
-    userId,
-    (doc.clientIds || []).map(String).slice(0, MAX_LEADS)
-  );
-  doc.clientIds = validIds;
+  const hasIncoming = Array.isArray(incomingLeads);
+  let audience;
+  if (hasIncoming || (Array.isArray(doc.leads) && doc.leads.length > 0)) {
+    audience = normalizeCampaignLeads(hasIncoming ? incomingLeads : doc.leads);
+    if (!audience.length) {
+      const err = new Error('Inclua pelo menos um contato com nome e telefone válidos.');
+      err.statusCode = 400;
+      throw err;
+    }
+    for (const lead of audience) {
+      if (lead.clientId) continue;
+      const found = await findClientByPhone(Client, userId, lead.phone);
+      if (found) lead.clientId = String(found._id);
+    }
+    doc.leads = audience;
+    doc.clientIds = audience
+      .map((l) => l.clientId)
+      .filter((id) => id && mongoose.Types.ObjectId.isValid(id));
+  } else {
+    const validIds = await validateClientIds(
+      userId,
+      (doc.clientIds || []).map(String).slice(0, MAX_LEADS)
+    );
+    doc.clientIds = validIds;
+    const clients = await Client.find({
+      userId,
+      _id: { $in: validIds },
+    })
+      .select('_id name phone')
+      .lean();
+    audience = clients.map((c) => ({
+      id: String(c._id),
+      clientId: String(c._id),
+      name: c.name,
+      phone: c.phone,
+    }));
+  }
 
-  const clients = await Client.find({
-    userId,
-    _id: { $in: validIds },
-  })
-    .select('_id name phone')
-    .lean();
+  if (!audience.length) {
+    const err = new Error('Esta campanha não tem contatos para disparar.');
+    err.statusCode = 400;
+    throw err;
+  }
 
   const scheduledAt = doc.suggestedSendAt || pickSendAt(doc.dateKey, 0);
   let queued = 0;
-  for (const client of clients) {
+  for (const lead of audience) {
     const message = String(selected.body)
-      .replace(/\{\{\s*nome\s*\}\}/gi, outbox.firstName(client.name));
+      .replace(/\{\{\s*nome\s*\}\}/gi, outbox.firstName(lead.name));
     const result = await outbox.enqueue({
       userId,
-      clientId: client._id,
-      phone: client.phone,
+      clientId: lead.clientId || null,
+      phone: lead.phone,
       message,
       kind: 'daily_campaign',
       scheduledAt,
       campaignId: doc._id,
-      dedupeKey: `campaign:${doc._id}:${client._id}`,
+      dedupeKey: lead.clientId
+        ? `campaign:${doc._id}:${lead.clientId}`
+        : `campaign:${doc._id}:p:${stripPhoneDigits(lead.phone)}`,
       sourceRef: `whatsappCampaign:${doc._id}`,
-      meta: { objective: doc.objective, variantId: selected.id },
+      meta: { objective: doc.objective, variantId: selected.id, name: lead.name },
     });
     if (result.queued) queued += 1;
   }
@@ -794,6 +878,40 @@ async function rejectCampaign(userId, campaignId) {
   return serializeCampaignSummary(doc);
 }
 
+async function replaceCampaignLeads(userId, campaignId, rawLeads) {
+  const doc = await WhatsAppCampaign.findOne({ _id: campaignId, userId });
+  if (!doc) {
+    const err = new Error('Campanha não encontrada');
+    err.statusCode = 404;
+    throw err;
+  }
+  if (doc.status !== 'pending_approval') {
+    const err = new Error('Só é possível editar contatos de campanhas pendentes.');
+    err.statusCode = 409;
+    throw err;
+  }
+
+  const leads = normalizeCampaignLeads(rawLeads);
+  for (const lead of leads) {
+    if (lead.clientId) continue;
+    const found = await findClientByPhone(Client, userId, lead.phone);
+    if (found) lead.clientId = String(found._id);
+  }
+
+  doc.leads = leads;
+  doc.clientIds = leads
+    .map((l) => l.clientId)
+    .filter((id) => id && mongoose.Types.ObjectId.isValid(id));
+  const count = leads.length;
+  doc.audienceSummary = `${count} contato${count === 1 ? '' : 's'}`;
+  await doc.save();
+
+  return {
+    ...serializeCampaignSummary(doc),
+    clients: publicClientsFromLeads(leads),
+  };
+}
+
 async function getHomeSummary(userId) {
   const dateKey = todayKeySp();
   const pending = await WhatsAppCampaign.find({
@@ -823,6 +941,8 @@ module.exports = {
   getCampaignDetail,
   approveCampaign,
   rejectCampaign,
+  replaceCampaignLeads,
+  normalizeCampaignLeads,
   getHomeSummary,
   MAX_LEADS,
 };

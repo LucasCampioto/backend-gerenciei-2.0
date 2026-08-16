@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const simulationSchema = new mongoose.Schema(
   {
@@ -27,5 +28,7 @@ const simulationSchema = new mongoose.Schema(
 
 simulationSchema.index({ userId: 1, date: -1 });
 simulationSchema.index({ userId: 1, clientId: 1 });
+
+simulationSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('Simulation', simulationSchema);

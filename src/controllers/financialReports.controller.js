@@ -1,3 +1,4 @@
+const { tenantFilter, tenantCreateFields, scopeUserId } = require('../utils/tenantScope');
 const mongoose = require('mongoose');
 const Sale = require('../models/Sale');
 const Expense = require('../models/Expense');
@@ -32,7 +33,7 @@ function parseDateRange(startDate, endDate) {
 
 async function getMonthlyRevenue(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const currentYear = new Date().getUTCFullYear();
     const year = parseInt(req.query.year, 10) || currentYear;
 
@@ -102,7 +103,7 @@ async function getMonthlyRevenue(req, res, next) {
 
 async function getSalesByProcedure(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const { startDate, endDate } = req.query;
 
     if (!startDate || !endDate) {
@@ -323,7 +324,7 @@ function buildPeriodMeta(start, end) {
 
 async function getExecutiveDashboard(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const { startDate, endDate } = req.query;
 
     let currentRange;
@@ -423,7 +424,7 @@ async function getExecutiveDashboard(req, res, next) {
 
 async function getEmployeePerformance(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const { startDate, endDate } = req.query;
 
     if (!startDate || !endDate) {
@@ -491,7 +492,7 @@ async function getEmployeePerformance(req, res, next) {
 
 async function getPaymentMethods(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const { startDate, endDate } = req.query;
 
     if (!startDate || !endDate) {
@@ -554,7 +555,7 @@ async function getPaymentMethods(req, res, next) {
 
 async function getProceduresByPaymentMethod(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const { startDate, endDate, paymentMethod } = req.query;
 
     if (!startDate || !endDate || !paymentMethod) {
@@ -612,7 +613,7 @@ async function getProceduresByPaymentMethod(req, res, next) {
 
 async function getMonthComparison(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const now = new Date();
     const currentYear = now.getUTCFullYear();
     const currentMonth = now.getUTCMonth() + 1;

@@ -1,5 +1,6 @@
 const StockItem = require('../models/StockItem');
 const mongoose = require('mongoose');
+const { tenantFilter, tenantDocFilter, tenantCreateFields } = require('../utils/tenantScope');
 
 function formatStockItem(item) {
   const obj = item.toObject();
@@ -26,7 +27,7 @@ function normalizeOptionalCost(value) {
 async function getAllStockItems(req, res, next) {
   try {
     const { q, lowOnly } = req.query;
-    const query = { userId: req.userId };
+    const query = { ...tenantFilter(req) };
 
     if (typeof q === 'string' && q.trim()) {
       query.name = { $regex: q.trim(), $options: 'i' };
@@ -52,7 +53,7 @@ async function createStockItem(req, res, next) {
     const { name, quantity, unit, minQuantity, totalCost, unitCost, notes, active } = req.body;
 
     const item = new StockItem({
-      userId: req.userId,
+      ...tenantCreateFields(req),
       name,
       quantity,
       unit,
@@ -88,7 +89,7 @@ async function updateStockItem(req, res, next) {
     }
 
     const item = await StockItem.findOneAndUpdate(
-      { _id: id, userId: req.userId },
+      { _id: id, ...tenantFilter(req) },
       {
         name,
         quantity,
@@ -130,7 +131,7 @@ async function deleteStockItem(req, res, next) {
       });
     }
 
-    const item = await StockItem.findOneAndDelete({ _id: id, userId: req.userId });
+    const item = await StockItem.findOneAndDelete({ _id: id, ...tenantFilter(req) });
 
     if (!item) {
       return res.status(404).json({

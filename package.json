@@ -8,7 +8,9 @@
     "dev": "nodemon index.js",
     "generate:jwt-secret": "node scripts/generate-jwt-secret.js",
     "migrate:luni": "node scripts/migrate-luni-to-gerenciei.js",
-    "test": "node --test src/services/simulation/*.test.js src/models/*.test.js src/services/*.test.js"
+    "migrate:organizations": "node scripts/migrate-to-organizations.js",
+    "migrate:organizations:apply": "node scripts/migrate-to-organizations.js --apply",
+    "test": "node --test src/services/simulation/*.test.js src/models/*.test.js src/services/*.test.js src/utils/*.test.js"
   },
   "keywords": [],
   "author": "",

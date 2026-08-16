@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const procedureCommissionSchema = new mongoose.Schema({
   procedureId: {
@@ -29,6 +30,14 @@ const employeeSchema = new mongoose.Schema({
     trim: true,
     lowercase: true
   },
+  /** Conta de login (membro da org) ligada a este colaborador de comissão. */
+  linkedUserId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: false,
+    default: null,
+    index: true,
+  },
   phone: {
     type: String,
     trim: true
@@ -43,6 +52,8 @@ const employeeSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
+
+employeeSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('Employee', employeeSchema);
 

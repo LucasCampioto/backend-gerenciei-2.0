@@ -4,23 +4,32 @@ const documentSchema = Joi.object({
   fileName: Joi.string().optional(),
   fileType: Joi.string().valid('application/pdf', 'image/png', 'image/jpeg', 'image/jpg').optional(),
   fileUrl: Joi.string().allow('').optional(),
-  signatureUrl: Joi.string().required().messages({
-    'any.required': 'URL da assinatura é obrigatória'
-  }),
-  userName: Joi.string().required().messages({
-    'any.required': 'Nome do usuário é obrigatório'
-  }),
-  userEmail: Joi.string().email().required().messages({
+  signatureUrl: Joi.string().allow('').optional(),
+  userName: Joi.string().allow('').optional(),
+  userEmail: Joi.string().email().allow('').optional().messages({
     'string.email': 'Email inválido',
-    'any.required': 'Email do usuário é obrigatório'
   }),
   observations: Joi.string().allow('').optional(),
+  title: Joi.string().trim().allow('').max(200).optional(),
+  origin: Joi.string().valid('digital_signature', 'physical_scan').optional(),
+  templateId: Joi.string().allow('').optional(),
+  signedAt: Joi.alternatives().try(Joi.date(), Joi.string().allow('')).optional(),
   clientId: Joi.string().allow('').optional(),
   saleId: Joi.string().allow('').optional(),
   procedureId: Joi.string().allow('').optional(),
+  hasFile: Joi.boolean().optional(),
 }).custom((value, helpers) => {
-  // Validar que há fileUrl ou que será fornecido via upload
-  // A validação completa será feita no controller
+  if (value.origin === 'physical_scan') {
+    if (!value.clientId) {
+      return helpers.message('Paciente é obrigatório para ficha física');
+    }
+    if (!value.signedAt) {
+      return helpers.message('Data da assinatura no papel é obrigatória');
+    }
+    if (!value.hasFile && !String(value.fileUrl || '').trim()) {
+      return helpers.message('Arquivo da ficha é obrigatório');
+    }
+  }
   return value;
 });
 

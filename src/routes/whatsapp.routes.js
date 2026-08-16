@@ -14,6 +14,7 @@ const {
   getCampaign,
   approveCampaign,
   rejectCampaign,
+  updateCampaignLeads,
   generateCampaignsNow,
   listOutbox,
 } = require('../controllers/whatsapp.controller');
@@ -32,6 +33,7 @@ router.get('/outbox', listOutbox);
 router.get('/campaigns', listCampaigns);
 router.post('/campaigns/generate', generateCampaignsNow);
 router.get('/campaigns/:id', getCampaign);
+router.put('/campaigns/:id/leads', updateCampaignLeads);
 router.post('/campaigns/:id/approve', approveCampaign);
 router.post('/campaigns/:id/reject', rejectCampaign);
 

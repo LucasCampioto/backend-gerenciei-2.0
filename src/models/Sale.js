@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const saleItemSchema = new mongoose.Schema({
   procedureId: {
@@ -107,6 +108,8 @@ const saleSchema = new mongoose.Schema({
 });
 
 saleSchema.index({ createdAt: 1 });
+
+saleSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('Sale', saleSchema);
 

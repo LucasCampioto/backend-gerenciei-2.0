@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const answerSchema = new mongoose.Schema({
   questionId: {
@@ -56,5 +57,7 @@ const formResponseSchema = new mongoose.Schema({
 formResponseSchema.index({ formId: 1, submittedAt: -1 });
 formResponseSchema.index({ clientId: 1, formId: 1 });
 formResponseSchema.index({ userId: 1, formId: 1 });
+
+formResponseSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('FormResponse', formResponseSchema);

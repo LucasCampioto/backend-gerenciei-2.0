@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 const { BRAND_GROUP_IDS } = require('../constants/paymentFee.constants');
 
 const paymentFeeSchema = new mongoose.Schema({
@@ -29,5 +30,7 @@ const paymentFeeSchema = new mongoose.Schema({
 });
 
 paymentFeeSchema.index({ userId: 1, brandGroup: 1, feeKey: 1 }, { unique: true });
+
+paymentFeeSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('PaymentFee', paymentFeeSchema);

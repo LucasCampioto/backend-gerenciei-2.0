@@ -1,3 +1,4 @@
+const { tenantFilter, tenantCreateFields, scopeUserId } = require('../utils/tenantScope');
 const noShowService = require('../services/calendarNoShow.service');
 
 function httpError(res, error) {
@@ -11,7 +12,7 @@ function httpError(res, error) {
 
 async function markNoShow(req, res) {
   try {
-    const data = await noShowService.markNoShow(req.userId, {
+    const data = await noShowService.markNoShow(scopeUserId(req), {
       calendarEventId: req.body?.calendarEventId || req.params?.eventId,
       eventStart: req.body?.eventStart,
       eventTitle: req.body?.eventTitle || req.body?.summary,
@@ -26,7 +27,7 @@ async function markNoShow(req, res) {
 async function unmarkNoShow(req, res) {
   try {
     const eventId = req.params?.eventId || req.body?.calendarEventId;
-    const data = await noShowService.unmarkNoShow(req.userId, eventId);
+    const data = await noShowService.unmarkNoShow(scopeUserId(req), eventId);
     return res.json({ success: true, data });
   } catch (error) {
     return httpError(res, error);
@@ -39,7 +40,7 @@ async function listNoShows(req, res) {
     if (typeof req.query?.eventIds === 'string' && req.query.eventIds.trim()) {
       eventIds = req.query.eventIds.split(',').map((s) => s.trim()).filter(Boolean);
     }
-    const data = await noShowService.listNoShows(req.userId, {
+    const data = await noShowService.listNoShows(scopeUserId(req), {
       eventIds,
       from: req.query?.from,
       to: req.query?.to,

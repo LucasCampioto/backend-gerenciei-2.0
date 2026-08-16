@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const clientActivitySchema = new mongoose.Schema({
   userId: {
@@ -54,5 +55,7 @@ const clientActivitySchema = new mongoose.Schema({
 
 clientActivitySchema.index({ userId: 1, createdAt: -1 });
 clientActivitySchema.index({ userId: 1, clientId: 1, createdAt: -1 });
+
+clientActivitySchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('ClientActivity', clientActivitySchema);

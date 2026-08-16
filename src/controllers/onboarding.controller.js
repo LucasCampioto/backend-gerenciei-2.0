@@ -1,3 +1,4 @@
+const { tenantFilter, tenantCreateFields, scopeUserId } = require('../utils/tenantScope');
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const Procedure = require('../models/Procedure');
@@ -13,8 +14,8 @@ const DEMO_PROCEDURES = [
 
 async function getOnboardingStatus(req, res, next) {
   try {
-    const user = await User.findById(req.userId).select('onboardingCompleted').lean();
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const user = await User.findById(scopeUserId(req)).select('onboardingCompleted').lean();
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
 
     const [procedureCount, saleCount] = await Promise.all([
       Procedure.countDocuments({ userId: userObjectId }),
@@ -40,8 +41,8 @@ async function getOnboardingStatus(req, res, next) {
 
 async function bootstrapOnboarding(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
-    const user = await User.findById(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
+    const user = await User.findById(scopeUserId(req));
 
     if (!user) {
       return res.status(404).json({ success: false, error: 'Usuário não encontrado' });

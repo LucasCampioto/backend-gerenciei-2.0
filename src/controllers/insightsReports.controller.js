@@ -1,3 +1,4 @@
+const { tenantFilter, tenantCreateFields, scopeUserId } = require('../utils/tenantScope');
 const mongoose = require('mongoose');
 const Sale = require('../models/Sale');
 const User = require('../models/User');
@@ -174,7 +175,7 @@ function splitPeriodHalves(start, end) {
 
 async function getSeasonality(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const { startDate, endDate } = req.query;
 
     if (!startDate || !endDate) {
@@ -296,7 +297,7 @@ async function getSeasonality(req, res, next) {
 
 async function getProcedureMix(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const { startDate, endDate } = req.query;
 
     if (!startDate || !endDate) {
@@ -474,7 +475,7 @@ async function getProcedureMix(req, res, next) {
 
 async function getCalendarOccupancy(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const { startDate, endDate } = req.query;
 
     if (!startDate || !endDate) {
@@ -492,7 +493,7 @@ async function getCalendarOccupancy(req, res, next) {
       });
     }
 
-    const user = await User.findById(req.userId).select(
+    const user = await User.findById(scopeUserId(req)).select(
       'googleCalendarConnected googleCalendarId googleCalendarName'
     );
 
@@ -507,7 +508,7 @@ async function getCalendarOccupancy(req, res, next) {
     const { timeMin, timeMax } = calendarQueryBounds(startDate, endDate);
 
     const [events, sales] = await Promise.all([
-      getEvents(req.userId, {
+      getEvents(scopeUserId(req), {
         calendarId: user.googleCalendarId || 'primary',
         timeMin,
         timeMax,

@@ -4,6 +4,7 @@
 const CommercialAction = require('../models/CommercialAction');
 const Procedure = require('../models/Procedure');
 const Sale = require('../models/Sale');
+const { tenantFilter, tenantDocFilter, tenantCreateFields, scopeUserId } = require('../utils/tenantScope');
 const {
   loadClientContext,
   formatCommercialAction,
@@ -13,7 +14,7 @@ const mongoose = require('mongoose');
 
 async function getClientContext(req, res, next) {
   try {
-    const data = await loadClientContext(req.userId, req.params.clientId);
+    const data = await loadClientContext(scopeUserId(req), req.params.clientId);
     if (!data) {
       return res.status(404).json({ success: false, error: 'Cliente não encontrado' });
     }
@@ -25,7 +26,7 @@ async function getClientContext(req, res, next) {
 
 async function listProcedures(req, res, next) {
   try {
-    const procedures = await Procedure.find({ userId: req.userId })
+    const procedures = await Procedure.find({ ...tenantFilter(req) })
       .select('name value category compatibleWith returnAfterDays')
       .lean();
     res.json({
@@ -46,7 +47,7 @@ async function listProcedures(req, res, next) {
 
 async function listSalesSignals(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const rows = await Sale.aggregate([
       { $match: { userId: userObjectId } },
       {
@@ -117,7 +118,7 @@ async function upsertCommercialAction(req, res, next) {
     }
 
     let action = await CommercialAction.findOne({
-      userId: req.userId,
+      ...tenantCreateFields(req),
       clientId,
       type,
       status: { $in: ['pending', 'snoozed'] },
@@ -143,7 +144,7 @@ async function upsertCommercialAction(req, res, next) {
       await action.save();
     } else {
       action = await CommercialAction.create({
-        userId: req.userId,
+        ...tenantCreateFields(req),
         clientId,
         clientName: clientName || '',
         phone: phone || '',
@@ -179,7 +180,7 @@ async function logInternalActivity(req, res, next) {
       });
     }
     const activity = await logActivity({
-      userId: req.userId,
+      ...tenantCreateFields(req),
       clientId,
       clientName: clientName || '',
       type,

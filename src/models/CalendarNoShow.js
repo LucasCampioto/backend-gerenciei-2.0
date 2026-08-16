@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const calendarNoShowSchema = new mongoose.Schema(
   {
@@ -55,5 +56,7 @@ const calendarNoShowSchema = new mongoose.Schema(
 
 calendarNoShowSchema.index({ userId: 1, calendarEventId: 1 }, { unique: true });
 calendarNoShowSchema.index({ userId: 1, followUpStatus: 1, eventStart: 1 });
+
+calendarNoShowSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('CalendarNoShow', calendarNoShowSchema);

@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const whatsAppReminderLogSchema = new mongoose.Schema(
   {
@@ -45,5 +46,7 @@ const whatsAppReminderLogSchema = new mongoose.Schema(
 );
 
 whatsAppReminderLogSchema.index({ userId: 1, calendarEventId: 1 }, { unique: true });
+
+whatsAppReminderLogSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('WhatsAppReminderLog', whatsAppReminderLogSchema);

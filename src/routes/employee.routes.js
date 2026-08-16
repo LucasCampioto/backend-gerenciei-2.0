@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const {
   getAllEmployees,
+  ensureMeAsEmployee,
   createEmployee,
   updateEmployee,
   deleteEmployee,
@@ -14,6 +15,7 @@ const { employeeSchema } = require('../validators/employee.validator');
 router.use(authenticate);
 
 router.get('/', getAllEmployees);
+router.post('/ensure-me', ensureMeAsEmployee);
 router.post('/', validate(employeeSchema), createEmployee);
 router.put('/:id', validate(employeeSchema), updateEmployee);
 router.delete('/:id', deleteEmployee);

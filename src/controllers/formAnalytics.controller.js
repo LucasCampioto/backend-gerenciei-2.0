@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 const { formatChoiceDisplayValue, normalizeChoiceForAnalytics } = require('../utils/choiceAnswer');
 const { findClientByPhone, stripPhoneDigits } = require('../utils/phoneMatch');
 const { logActivity } = require('../services/clientActivity.service');
+const { tenantFilter, tenantDocFilter, tenantCreateFields, scopeUserId } = require('../utils/tenantScope');
 
 function parseDateRange(startDate, endDate) {
   const filter = {};
@@ -199,7 +200,7 @@ async function getFormResponses(req, res, next) {
       return res.status(400).json({ success: false, error: 'ID inválido' });
     }
 
-    const form = await Form.findOne({ _id: id, userId: req.userId });
+    const form = await Form.findOne({ _id: id, ...tenantFilter(req) });
     if (!form) {
       return res.status(404).json({ success: false, error: 'Formulário não encontrado' });
     }
@@ -215,8 +216,7 @@ async function getFormResponses(req, res, next) {
 
     const clientIds = [...new Set(responses.map((r) => r.clientId.toString()).filter(Boolean))];
     const clients = await Client.find({
-      _id: { $in: clientIds },
-      userId: req.userId,
+      _id: { $in: clientIds }, ...tenantFilter(req),
     }).select('name phone category');
     const clientMap = new Map(clients.map((c) => [c._id.toString(), c]));
     const questionMap = new Map(form.questions.map((q) => [q.id, q]));
@@ -251,7 +251,7 @@ async function convertResponseToClient(req, res, next) {
       return res.status(400).json({ success: false, error: 'ID inválido' });
     }
 
-    const form = await Form.findOne({ _id: id, userId: req.userId });
+    const form = await Form.findOne({ _id: id, ...tenantFilter(req) });
     if (!form) {
       return res.status(404).json({ success: false, error: 'Formulário não encontrado' });
     }
@@ -259,7 +259,7 @@ async function convertResponseToClient(req, res, next) {
     const response = await FormResponse.findOne({
       _id: responseId,
       formId: form._id,
-      userId: req.userId,
+      ...tenantCreateFields(req),
     });
 
     if (!response) {
@@ -288,11 +288,11 @@ async function convertResponseToClient(req, res, next) {
 
     let client = null;
     if (response.clientId && mongoose.Types.ObjectId.isValid(response.clientId)) {
-      client = await Client.findOne({ _id: response.clientId, userId: req.userId });
+      client = await Client.findOne({ _id: response.clientId, ...tenantFilter(req) });
     }
 
     if (!client && response.respondentPhone) {
-      client = await findClientByPhone(Client, req.userId, response.respondentPhone);
+      client = await findClientByPhone(Client, scopeUserId(req), response.respondentPhone);
     }
 
     const formTitle = (form.title || 'Formulário').trim() || 'Formulário';
@@ -309,7 +309,7 @@ async function convertResponseToClient(req, res, next) {
       }
 
       client = new Client({
-        userId: req.userId,
+        ...tenantCreateFields(req),
         name: requestedName,
         phone,
         category: 'cliente',
@@ -333,7 +333,7 @@ async function convertResponseToClient(req, res, next) {
       converted = true;
 
       await logActivity({
-        userId: req.userId,
+        ...tenantCreateFields(req),
         clientId: client._id,
         clientName: client.name,
         type: 'note',
@@ -360,7 +360,7 @@ async function convertResponseToClient(req, res, next) {
         }
         converted = true;
         await logActivity({
-          userId: req.userId,
+          ...tenantCreateFields(req),
           clientId: client._id,
           clientName: client.name,
           type: 'note',
@@ -409,7 +409,7 @@ async function getFormAnalytics(req, res, next) {
       return res.status(400).json({ success: false, error: 'ID inválido' });
     }
 
-    const form = await Form.findOne({ _id: id, userId: req.userId });
+    const form = await Form.findOne({ _id: id, ...tenantFilter(req) });
     if (!form) {
       return res.status(404).json({ success: false, error: 'Formulário não encontrado' });
     }
@@ -422,8 +422,7 @@ async function getFormAnalytics(req, res, next) {
 
     const clientIds = [...new Set(responses.map((r) => r.clientId.toString()).filter(Boolean))];
     const clients = await Client.find({
-      _id: { $in: clientIds },
-      userId: req.userId,
+      _id: { $in: clientIds }, ...tenantFilter(req),
     }).select('name phone category');
     const clientMap = new Map(clients.map((c) => [c._id.toString(), c]));
     const questionMap = new Map(form.questions.map((q) => [q.id, q]));

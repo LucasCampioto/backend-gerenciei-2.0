@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 const postSchema = new mongoose.Schema(
   {
@@ -48,5 +49,7 @@ const contentPlanSchema = new mongoose.Schema(
 );
 
 contentPlanSchema.index({ userId: 1, month: 1 }, { unique: true });
+
+contentPlanSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('ContentPlan', contentPlanSchema);

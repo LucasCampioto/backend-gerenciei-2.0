@@ -1,3 +1,4 @@
+const { tenantFilter, tenantCreateFields, scopeUserId } = require('../utils/tenantScope');
 const {
   listCampaigns,
   getCampaign,
@@ -21,7 +22,7 @@ const { parseLeadPhotoMultipart } = require('../middleware/parseLeadPhotoMultipa
 
 async function list(req, res, next) {
   try {
-    const data = await listCampaigns(req.userId);
+    const data = await listCampaigns(scopeUserId(req));
     res.json({ success: true, data });
   } catch (error) {
     next(error);
@@ -30,7 +31,7 @@ async function list(req, res, next) {
 
 async function getOne(req, res, next) {
   try {
-    const data = await getCampaign(req.userId, req.params.id);
+    const data = await getCampaign(scopeUserId(req), req.params.id);
     res.json({ success: true, data });
   } catch (error) {
     if (error.statusCode === 404) {
@@ -42,7 +43,7 @@ async function getOne(req, res, next) {
 
 async function stats(req, res, next) {
   try {
-    const data = await getCampaignStats(req.userId, req.params.id);
+    const data = await getCampaignStats(scopeUserId(req), req.params.id);
     res.json({ success: true, data });
   } catch (error) {
     if (error.statusCode === 404) {
@@ -54,7 +55,7 @@ async function stats(req, res, next) {
 
 async function create(req, res, next) {
   try {
-    const data = await createCampaign(req.userId, req.body || {});
+    const data = await createCampaign(scopeUserId(req), req.body || {});
     res.status(201).json({ success: true, data });
   } catch (error) {
     next(error);
@@ -63,7 +64,7 @@ async function create(req, res, next) {
 
 async function themeSuggestions(req, res, next) {
   try {
-    const data = await suggestCampaignThemes(req.userId, req.body || {});
+    const data = await suggestCampaignThemes(scopeUserId(req), req.body || {});
     res.json({ success: true, data });
   } catch (error) {
     if ([400, 502, 503].includes(error.statusCode)) {
@@ -75,7 +76,7 @@ async function themeSuggestions(req, res, next) {
 
 async function generate(req, res, next) {
   try {
-    const data = await generateCampaignContent(req.userId, req.params.id);
+    const data = await generateCampaignContent(scopeUserId(req), req.params.id);
     res.json({ success: true, data });
   } catch (error) {
     if (error.statusCode === 404) {
@@ -87,7 +88,7 @@ async function generate(req, res, next) {
 
 async function update(req, res, next) {
   try {
-    const data = await updateCampaign(req.userId, req.params.id, req.body || {});
+    const data = await updateCampaign(scopeUserId(req), req.params.id, req.body || {});
     res.json({ success: true, data });
   } catch (error) {
     if (error.statusCode === 404) {
@@ -99,7 +100,7 @@ async function update(req, res, next) {
 
 async function publish(req, res, next) {
   try {
-    const data = await publishCampaign(req.userId, req.params.id);
+    const data = await publishCampaign(scopeUserId(req), req.params.id);
     res.json({ success: true, data });
   } catch (error) {
     if ([400, 404].includes(error.statusCode)) {
@@ -111,7 +112,7 @@ async function publish(req, res, next) {
 
 async function remove(req, res, next) {
   try {
-    const data = await deleteCampaign(req.userId, req.params.id);
+    const data = await deleteCampaign(scopeUserId(req), req.params.id);
     res.json({ success: true, data });
   } catch (error) {
     if (error.statusCode === 404) {
@@ -123,7 +124,7 @@ async function remove(req, res, next) {
 
 async function removeLead(req, res, next) {
   try {
-    const data = await removeCampaignLead(req.userId, req.params.id, req.params.leadId);
+    const data = await removeCampaignLead(scopeUserId(req), req.params.id, req.params.leadId);
     res.json({ success: true, data, message: 'Lead removido da campanha e da base' });
   } catch (error) {
     if (error.statusCode === 404 || error.statusCode === 400) {
@@ -136,7 +137,7 @@ async function removeLead(req, res, next) {
 async function generateLeadSimulation(req, res, next) {
   try {
     const data = await generateCampaignLeadSimulation(
-      req.userId,
+      scopeUserId(req),
       req.params.id,
       req.params.leadId
     );

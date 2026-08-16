@@ -1,3 +1,4 @@
+const { tenantFilter, tenantCreateFields, scopeUserId } = require('../utils/tenantScope');
 const whatsappService = require('../services/whatsapp.service');
 
 function httpError(res, error, fallbackStatus = 500) {
@@ -11,7 +12,7 @@ function httpError(res, error, fallbackStatus = 500) {
 
 async function getSettings(req, res) {
   try {
-    const data = await whatsappService.getSettings(req.userId);
+    const data = await whatsappService.getSettings(scopeUserId(req));
     return res.json({ success: true, data });
   } catch (error) {
     return httpError(res, error);
@@ -20,7 +21,7 @@ async function getSettings(req, res) {
 
 async function updateSettings(req, res) {
   try {
-    const data = await whatsappService.updateSettings(req.userId, req.body || {});
+    const data = await whatsappService.updateSettings(scopeUserId(req), req.body || {});
     return res.json({ success: true, data });
   } catch (error) {
     return httpError(res, error);
@@ -29,7 +30,7 @@ async function updateSettings(req, res) {
 
 async function connect(req, res) {
   try {
-    const data = await whatsappService.connect(req.userId);
+    const data = await whatsappService.connect(scopeUserId(req));
     return res.json({ success: true, data });
   } catch (error) {
     return httpError(res, error);
@@ -38,7 +39,7 @@ async function connect(req, res) {
 
 async function getStatus(req, res) {
   try {
-    const data = await whatsappService.getStatus(req.userId);
+    const data = await whatsappService.getStatus(scopeUserId(req));
     return res.json({ success: true, data });
   } catch (error) {
     return httpError(res, error);
@@ -47,7 +48,7 @@ async function getStatus(req, res) {
 
 async function disconnect(req, res) {
   try {
-    const data = await whatsappService.disconnect(req.userId);
+    const data = await whatsappService.disconnect(scopeUserId(req));
     return res.json({ success: true, data });
   } catch (error) {
     return httpError(res, error);
@@ -56,7 +57,7 @@ async function disconnect(req, res) {
 
 async function testSend(req, res) {
   try {
-    const data = await whatsappService.sendTestMessage(req.userId, {
+    const data = await whatsappService.sendTestMessage(scopeUserId(req), {
       phone: req.body?.phone,
       nome: req.body?.nome,
     });
@@ -68,7 +69,7 @@ async function testSend(req, res) {
 
 async function reminderLogs(req, res) {
   try {
-    const data = await whatsappService.listReminderLogs(req.userId, req.query?.limit);
+    const data = await whatsappService.listReminderLogs(scopeUserId(req), req.query?.limit);
     return res.json({ success: true, data });
   } catch (error) {
     return httpError(res, error);
@@ -123,7 +124,7 @@ async function processRemindersCron(req, res) {
 async function listCampaigns(req, res) {
   try {
     const campaignService = require('../services/whatsappCampaign.service');
-    const data = await campaignService.listCampaigns(req.userId, {
+    const data = await campaignService.listCampaigns(scopeUserId(req), {
       dateKey: req.query?.date,
       status: req.query?.status,
     });
@@ -136,7 +137,7 @@ async function listCampaigns(req, res) {
 async function getCampaign(req, res) {
   try {
     const campaignService = require('../services/whatsappCampaign.service');
-    const data = await campaignService.getCampaignDetail(req.userId, req.params.id);
+    const data = await campaignService.getCampaignDetail(scopeUserId(req), req.params.id);
     return res.json({ success: true, data });
   } catch (error) {
     return httpError(res, error);
@@ -146,11 +147,26 @@ async function getCampaign(req, res) {
 async function approveCampaign(req, res) {
   try {
     const campaignService = require('../services/whatsappCampaign.service');
-    const data = await campaignService.approveCampaign(req.userId, req.params.id, {
+    const data = await campaignService.approveCampaign(scopeUserId(req), req.params.id, {
       variantId: req.body?.variantId,
       sendAt: req.body?.sendAt,
       editedMessages: req.body?.editedMessages,
+      leads: req.body?.leads,
     });
+    return res.json({ success: true, data });
+  } catch (error) {
+    return httpError(res, error);
+  }
+}
+
+async function updateCampaignLeads(req, res) {
+  try {
+    const campaignService = require('../services/whatsappCampaign.service');
+    const data = await campaignService.replaceCampaignLeads(
+      scopeUserId(req),
+      req.params.id,
+      req.body?.leads
+    );
     return res.json({ success: true, data });
   } catch (error) {
     return httpError(res, error);
@@ -160,7 +176,7 @@ async function approveCampaign(req, res) {
 async function rejectCampaign(req, res) {
   try {
     const campaignService = require('../services/whatsappCampaign.service');
-    const data = await campaignService.rejectCampaign(req.userId, req.params.id);
+    const data = await campaignService.rejectCampaign(scopeUserId(req), req.params.id);
     return res.json({ success: true, data });
   } catch (error) {
     return httpError(res, error);
@@ -170,7 +186,7 @@ async function rejectCampaign(req, res) {
 async function generateCampaignsNow(req, res) {
   try {
     const campaignService = require('../services/whatsappCampaign.service');
-    const data = await campaignService.generateDailyCampaigns(req.userId, { force: true });
+    const data = await campaignService.generateDailyCampaigns(scopeUserId(req), { force: true });
     return res.json({ success: true, data });
   } catch (error) {
     return httpError(res, error);
@@ -180,7 +196,7 @@ async function generateCampaignsNow(req, res) {
 async function listOutbox(req, res) {
   try {
     const outbox = require('../services/whatsappOutbox.service');
-    const data = await outbox.listOutbox(req.userId, {
+    const data = await outbox.listOutbox(scopeUserId(req), {
       limit: req.query?.limit,
       kind: req.query?.kind,
       campaignId: req.query?.campaignId,
@@ -193,7 +209,7 @@ async function listOutbox(req, res) {
 
 async function setInstanceKey(req, res) {
   try {
-    const data = await whatsappService.setInstanceKey(req.userId, req.body?.instanceKey);
+    const data = await whatsappService.setInstanceKey(scopeUserId(req), req.body?.instanceKey);
     return res.json({ success: true, data });
   } catch (error) {
     return httpError(res, error);
@@ -214,6 +230,7 @@ module.exports = {
   getCampaign,
   approveCampaign,
   rejectCampaign,
+  updateCampaignLeads,
   generateCampaignsNow,
   listOutbox,
 };

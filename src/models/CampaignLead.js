@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { organizationScopePlugin } = require('./plugins/organizationScope');
 
 /**
  * Lead captado em campanha pública (eBook ou quiz).
@@ -81,5 +82,7 @@ const campaignLeadSchema = new mongoose.Schema(
 
 campaignLeadSchema.index({ campaignId: 1, phoneDigits: 1 }, { unique: true });
 campaignLeadSchema.index({ userId: 1, campaignId: 1, createdAt: -1 });
+
+campaignLeadSchema.plugin(organizationScopePlugin);
 
 module.exports = mongoose.model('CampaignLead', campaignLeadSchema);

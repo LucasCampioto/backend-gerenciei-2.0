@@ -1,3 +1,4 @@
+const { tenantFilter, tenantCreateFields, scopeUserId } = require('../utils/tenantScope');
 const mongoose = require('mongoose');
 const Campaign = require('../models/Campaign');
 const CampaignLead = require('../models/CampaignLead');
@@ -90,7 +91,7 @@ async function loadSalesMap(userObjectId, clientIds) {
  */
 async function getSourceFunnel(req, res, next) {
   try {
-    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(scopeUserId(req));
     const { campaignId, formId } = req.query;
 
     if (campaignId || formId) {
