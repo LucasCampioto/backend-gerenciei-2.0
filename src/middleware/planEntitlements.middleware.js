@@ -34,6 +34,7 @@ function requiredFeatureForPath(p) {
 function skipPlanGateAlways(p) {
   if (p.startsWith('/api/auth')) return true;
   if (p.startsWith('/api/admin')) return true;
+  if (p.startsWith('/api/demo')) return true;
   if (p.startsWith('/api/internal')) return true;
   if (p === '/api/stripe/webhook') return true;
   if (p.startsWith('/api/public/')) return true;

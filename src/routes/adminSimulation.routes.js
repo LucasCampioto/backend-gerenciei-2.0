@@ -24,6 +24,7 @@ router.post('/partner-users', async (req, res) => {
       name,
       clinic,
       password,
+      planTier,
       simulationCredits,
       previewCredits,
       partnerTestExpiresAt,
@@ -40,16 +41,22 @@ router.post('/partner-users', async (req, res) => {
       res.status(409).json({ message: 'Já existe uma conta com este e-mail' });
       return;
     }
-    const { user, plainPassword } = await createPartnerTestUser({
+    const created = await createPartnerTestUser({
       name: nm,
       clinic,
       email: em,
       password: password != null && String(password).length > 0 ? password : undefined,
+      planTier,
       simulationCredits,
       previewCredits,
       partnerTestExpiresAt,
       partnerTestDurationDays,
     });
+    if (created.error) {
+      res.status(created.status || 400).json({ message: created.error });
+      return;
+    }
+    const { user, plainPassword } = created;
     if (plainPassword) {
       await sendPartnerTestWelcomeEmail({
         to: em,

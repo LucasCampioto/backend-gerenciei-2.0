@@ -99,6 +99,7 @@ const whatsappRoutes = require('./routes/whatsapp.routes');
 const whatsappCronRoutes = require('./routes/whatsappCron.routes');
 const subscriptionRoutes = require('./routes/subscription.routes');
 const adminSimulationRoutes = require('./routes/adminSimulation.routes');
+const demoRoutes = require('./routes/demo.routes');
 const enhanceRoutes = require('./routes/enhance.routes');
 const enhancePairsRoutes = require('./routes/enhancePairs.routes');
 const simulationRoutes = require('./routes/simulation.routes');
@@ -133,6 +134,8 @@ app.use('/api/internal', internalRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/admin', adminSimulationRoutes);
+// Demo pública antes dos routers /api com authenticate (senão vira 401 genérico).
+app.use('/api/demo', demoRoutes);
 app.use('/api', enhancePairsRoutes);
 app.use('/api', simulationRoutes);
 app.use('/api', require('./routes/pricingBases.routes'));

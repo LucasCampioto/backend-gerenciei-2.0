@@ -63,6 +63,26 @@ describe('planEntitlements', () => {
     assert.equal(resolvePlanTier({ accountType: 'partner_test' }), 'profissional');
   });
 
+  it('resolvePlanTier: partner_test respects planTier gestao', () => {
+    assert.equal(
+      resolvePlanTier({ accountType: 'partner_test', planTier: 'gestao' }),
+      'gestao',
+    );
+    assert.equal(planHasFeature('gestao', 'ai_simulation'), false);
+    assert.equal(planHasFeature('gestao', 'whatsapp'), false);
+    assert.equal(planHasFeature('gestao', 'ops'), true);
+    assert.equal(planHasFeature('gestao', 'pricing_simulator'), true);
+  });
+
+  it('resolvePlanTier: partner_test with profissional keeps full app', () => {
+    assert.equal(
+      resolvePlanTier({ accountType: 'partner_test', planTier: 'profissional' }),
+      'profissional',
+    );
+    assert.equal(planHasFeature('profissional', 'ai_simulation'), true);
+    assert.equal(planHasFeature('profissional', 'whatsapp'), true);
+  });
+
   it('resolvePlanTier: bypass respects planTier override', () => {
     const prev = process.env.SUBSCRIPTION_BYPASS_USER_IDS;
     process.env.SUBSCRIPTION_BYPASS_USER_IDS = 'aaaaaaaaaaaaaaaaaaaaaaaa';

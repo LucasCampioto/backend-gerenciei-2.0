@@ -62,6 +62,26 @@ async function userToPublicWithOrgBilling(doc) {
   return overlayPublicBillingFields(out, billingUser);
 }
 
+const PARTNER_PLAN_TIERS = new Set(['gestao', 'profissional']);
+
+/**
+ * @param {unknown} planTier
+ * @param {{ required?: boolean }} [opts]
+ * @returns {{ tier: 'gestao' | 'profissional' } | { error: string }}
+ */
+function normalizePartnerPlanTier(planTier, opts = {}) {
+  const required = opts.required === true;
+  const raw = planTier != null ? String(planTier).trim().toLowerCase() : '';
+  if (!raw) {
+    if (required) return { error: 'planTier é obrigatório (gestao ou profissional)' };
+    return { tier: 'profissional' };
+  }
+  if (!PARTNER_PLAN_TIERS.has(raw)) {
+    return { error: 'planTier inválido (use gestao ou profissional)' };
+  }
+  return { tier: /** @type {'gestao' | 'profissional'} */ (raw) };
+}
+
 function resolvePartnerTestExpiresAt({ partnerTestExpiresAt, partnerTestDurationDays }) {
   const raw = partnerTestExpiresAt != null ? String(partnerTestExpiresAt).trim() : '';
   if (raw) {
@@ -208,6 +228,8 @@ async function acceptUserTerms(userId, { termsVersion, acceptTerms, acceptPrivac
 /**
  * Conta parceiro: cota fixa (sem reposição mensal), sem Stripe até upgrade.
  * Senha em texto plano — hash via pre-save do User Gerenciei.
+ * @param {{ planTier?: string, planTierRequired?: boolean }} opts
+ * @returns {Promise<{ user: import('mongoose').Document, plainPassword: string | null } | { error: string, status: number }>}
  */
 async function createPartnerTestUser({
   name,
@@ -216,9 +238,14 @@ async function createPartnerTestUser({
   password,
   simulationCredits = 10,
   previewCredits = 5,
+  planTier,
+  planTierRequired = false,
   partnerTestExpiresAt,
   partnerTestDurationDays,
 }) {
+  const tierResult = normalizePartnerPlanTier(planTier, { required: planTierRequired });
+  if (tierResult.error) return { error: tierResult.error, status: 400 };
+
   const raw = Number(simulationCredits);
   const credits = Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 10;
   const rawPreview = Number(previewCredits);
@@ -239,6 +266,7 @@ async function createPartnerTestUser({
     notifSms: false,
     firstAccess: true,
     accountType: 'partner_test',
+    planTier: tierResult.tier,
     simulationMonthlyQuota: 0,
     simulationCreditsRemaining: credits,
     simulationQuotaPeriodKey: '',
@@ -252,6 +280,91 @@ async function createPartnerTestUser({
     name: clinic || name,
   });
   return { user: withOrg, plainPassword: password != null && String(password).length > 0 ? null : pwd };
+}
+
+/**
+ * Atualiza conta parceiro (não altera email nem senha).
+ * @returns {Promise<{ user: import('mongoose').Document } | { error: string, status: number }>}
+ */
+async function updatePartnerTestUser(userId, patch = {}) {
+  const id = String(userId || '').trim();
+  if (!id) return { error: 'id inválido', status: 400 };
+
+  const user = await User.findById(id);
+  if (!user) return { error: 'Usuário não encontrado', status: 404 };
+  if (String(user.accountType || '') !== 'partner_test') {
+    return { error: 'Somente contas parceiro podem ser editadas por este endpoint', status: 400 };
+  }
+
+  const set = {};
+
+  if (patch.name !== undefined) {
+    const nm = String(patch.name || '').trim();
+    if (!nm) return { error: 'name é obrigatório', status: 400 };
+    set.name = nm;
+  }
+  if (patch.clinic !== undefined) {
+    set.clinic = String(patch.clinic || '').trim();
+  }
+  if (patch.phone !== undefined) {
+    set.phone = String(patch.phone || '').trim();
+  }
+
+  if (patch.planTier !== undefined) {
+    const tierResult = normalizePartnerPlanTier(patch.planTier, { required: true });
+    if (tierResult.error) return { error: tierResult.error, status: 400 };
+    set.planTier = tierResult.tier;
+  }
+
+  if (patch.simulationCredits !== undefined) {
+    const raw = Number(patch.simulationCredits);
+    if (!Number.isFinite(raw) || raw < 0) {
+      return { error: 'simulationCredits inválido', status: 400 };
+    }
+    set.simulationCreditsRemaining = Math.floor(raw);
+    set.simulationMonthlyQuota = 0;
+  }
+
+  if (patch.previewCredits !== undefined) {
+    const raw = Number(patch.previewCredits);
+    if (!Number.isFinite(raw) || raw < 0) {
+      return { error: 'previewCredits inválido', status: 400 };
+    }
+    const pts = Math.floor(raw);
+    set.previewCreditsRemaining = pts;
+    set.previewMonthlyQuota = pts;
+  }
+
+  const wantsExpiryClear =
+    patch.clearPartnerTestExpiresAt === true ||
+    patch.partnerTestExpiresAt === null ||
+    patch.partnerTestExpiresAt === '';
+
+  if (patch.partnerTestDurationDays !== undefined && patch.partnerTestDurationDays !== null && patch.partnerTestDurationDays !== '') {
+    const days = Number(patch.partnerTestDurationDays);
+    if (!Number.isFinite(days) || days <= 0) {
+      return { error: 'partnerTestDurationDays inválido', status: 400 };
+    }
+    set.partnerTestExpiresAt = resolvePartnerTestExpiresAt({ partnerTestDurationDays: days });
+  } else if (wantsExpiryClear) {
+    set.partnerTestExpiresAt = null;
+  } else if (patch.partnerTestExpiresAt !== undefined) {
+    const expiresAt = resolvePartnerTestExpiresAt({
+      partnerTestExpiresAt: patch.partnerTestExpiresAt,
+    });
+    if (expiresAt == null) {
+      return { error: 'partnerTestExpiresAt inválido', status: 400 };
+    }
+    set.partnerTestExpiresAt = expiresAt;
+  }
+
+  if (Object.keys(set).length === 0) {
+    return { user };
+  }
+
+  const updated = await User.findByIdAndUpdate(id, { $set: set }, { new: true });
+  if (!updated) return { error: 'Usuário não encontrado', status: 404 };
+  return { user: updated };
 }
 
 module.exports = {
@@ -270,4 +383,6 @@ module.exports = {
   updateUserStripeFields,
   acceptUserTerms,
   createPartnerTestUser,
+  updatePartnerTestUser,
+  normalizePartnerPlanTier,
 };
