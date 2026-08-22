@@ -1,6 +1,12 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { renderTemplate, normalizeName, matchScore } = require('./whatsapp.service');
+const {
+  renderTemplate,
+  normalizeName,
+  matchScore,
+  isEventBeforeDailyReminderDispatch,
+  formatDailyReminderTime,
+} = require('./whatsapp.service');
 
 describe('whatsapp.service renderTemplate', () => {
   it('substitui nome, data e horario', () => {
@@ -37,5 +43,20 @@ describe('whatsapp.service matchScore nome completo', () => {
   it('casa título com sobrenome parcial forte', () => {
     const score = matchScore('Leticia Pereira Silva', 'Leticia Pereira');
     assert.ok(score >= 120);
+  });
+});
+
+describe('whatsapp.service daily reminder dispatch window', () => {
+  it('formatDailyReminderTime retorna 8:30', () => {
+    assert.equal(formatDailyReminderTime(), '08:30');
+  });
+
+  it('isEventBeforeDailyReminderDispatch: antes das 8:30 no fuso da clínica', () => {
+    const early = new Date('2026-08-22T07:45:00-03:00');
+    const onTime = new Date('2026-08-22T08:30:00-03:00');
+    const later = new Date('2026-08-22T10:00:00-03:00');
+    assert.equal(isEventBeforeDailyReminderDispatch(early), true);
+    assert.equal(isEventBeforeDailyReminderDispatch(onTime), false);
+    assert.equal(isEventBeforeDailyReminderDispatch(later), false);
   });
 });

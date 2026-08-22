@@ -53,6 +53,22 @@ function isPastDailyReminderHour(date = new Date()) {
   return clinicMinuteSp(date) >= DAILY_REMINDER_MINUTE_SP;
 }
 
+function clinicTimeMinutesSp(date = new Date()) {
+  return clinicHourSp(date) * 60 + clinicMinuteSp(date);
+}
+
+/** Horário do evento é anterior ao lote diário (ex.: consulta 7h, disparo 8:30). */
+function isEventBeforeDailyReminderDispatch(eventStart) {
+  const start = eventStart instanceof Date ? eventStart : new Date(eventStart);
+  if (Number.isNaN(start.getTime())) return false;
+  const dispatchMinutes = DAILY_REMINDER_HOUR_SP * 60 + DAILY_REMINDER_MINUTE_SP;
+  return clinicTimeMinutesSp(start) < dispatchMinutes;
+}
+
+function formatDailyReminderTime() {
+  return `${String(DAILY_REMINDER_HOUR_SP).padStart(2, '0')}:${String(DAILY_REMINDER_MINUTE_SP).padStart(2, '0')}`;
+}
+
 function normalizeName(value = '') {
   return String(value)
     .normalize('NFD')
@@ -619,6 +635,23 @@ async function processRemindersForUser(userId, settings) {
       continue;
     }
 
+    if (isEventBeforeDailyReminderDispatch(eventStart)) {
+      try {
+        await WhatsAppReminderLog.create({
+          userId,
+          calendarEventId: event.id,
+          eventStart,
+          message: '',
+          status: 'skipped',
+          error: `horário antes do disparo programado (${formatDailyReminderTime()})`,
+        });
+      } catch (error) {
+        if (error?.code !== 11000) throw error;
+      }
+      skipped += 1;
+      continue;
+    }
+
     // Só confirma horários que ainda não passaram.
     if (eventStart.getTime() <= now) {
       skipped += 1;
@@ -786,6 +819,8 @@ module.exports = {
   matchScore,
   renderTemplate,
   matchClientForEvent,
+  isEventBeforeDailyReminderDispatch,
+  formatDailyReminderTime,
   getSettings,
   updateSettings,
   connect,
