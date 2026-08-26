@@ -401,6 +401,10 @@ async function getExecutiveDashboard(req, res, next) {
           lucro: previousLucro,
         },
         variacoes: {
+          faturamentoBruto: calcVariation(
+            currentSales.faturamentoBruto,
+            previousSales.faturamentoBruto
+          ),
           faturamentoLiquido: calcVariation(
             currentSales.faturamentoLiquido,
             previousSales.faturamentoLiquido
@@ -409,6 +413,7 @@ async function getExecutiveDashboard(req, res, next) {
             currentSales.quantidadeVendas,
             previousSales.quantidadeVendas
           ),
+          comissao: calcVariation(currentSales.comissao, previousSales.comissao),
           gastos: calcVariation(currentExpenses, previousExpenses),
           lucro: calcVariation(currentLucro, previousLucro),
           ticketMedio: calcVariation(currentSales.ticketMedio, previousSales.ticketMedio),
