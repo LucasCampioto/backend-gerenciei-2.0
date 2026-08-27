@@ -114,6 +114,10 @@ const whatsAppCampaignSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    cancelledAt: {
+      type: Date,
+      default: null,
+    },
     agentRunId: {
       type: String,
       default: '',

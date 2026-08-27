@@ -1,4 +1,4 @@
-const { stripPhoneDigits } = require('../utils/phoneMatch');
+const { stripPhoneDigits, toInternationalPhoneDigits } = require('../utils/phoneMatch');
 
 const WAME_TIMEOUT_MS = 15_000;
 
@@ -30,11 +30,16 @@ function assertConfigured() {
 }
 
 function toInternationalPhone(phone) {
-  let digits = stripPhoneDigits(phone);
-  if (!digits) return '';
-  if (digits.startsWith('55') && digits.length >= 12) return digits;
-  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
-  return digits;
+  return toInternationalPhoneDigits(phone);
+}
+
+function phoneFromWid(value) {
+  // "5511940452242:13@s.whatsapp.net" → 5511940452242
+  const local = String(value || '')
+    .trim()
+    .split('@')[0]
+    .split(':')[0];
+  return toInternationalPhoneDigits(local);
 }
 
 function isNotConnectedMessage(message) {
@@ -196,12 +201,14 @@ function pickConnectedPhone(payload) {
   ];
   for (const value of candidates) {
     if (typeof value === 'string' && value.trim()) {
-      return stripPhoneDigits(value.split('@')[0]);
+      const phone = phoneFromWid(value);
+      if (phone) return phone;
     }
     if (value && typeof value === 'object') {
       const nested = value.id || value.phone || value.user;
       if (typeof nested === 'string') {
-        return stripPhoneDigits(nested.split('@')[0]);
+        const phone = phoneFromWid(nested);
+        if (phone) return phone;
       }
     }
   }

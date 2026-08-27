@@ -173,10 +173,35 @@ async function updateCampaignLeads(req, res) {
   }
 }
 
+async function updateCampaign(req, res) {
+  try {
+    const campaignService = require('../services/whatsappCampaign.service');
+    const data = await campaignService.updateApprovedCampaign(scopeUserId(req), req.params.id, {
+      variantId: req.body?.variantId,
+      sendAt: req.body?.sendAt,
+      editedMessages: req.body?.editedMessages,
+      leads: req.body?.leads,
+    });
+    return res.json({ success: true, data });
+  } catch (error) {
+    return httpError(res, error);
+  }
+}
+
 async function rejectCampaign(req, res) {
   try {
     const campaignService = require('../services/whatsappCampaign.service');
     const data = await campaignService.rejectCampaign(scopeUserId(req), req.params.id);
+    return res.json({ success: true, data });
+  } catch (error) {
+    return httpError(res, error);
+  }
+}
+
+async function cancelCampaign(req, res) {
+  try {
+    const campaignService = require('../services/whatsappCampaign.service');
+    const data = await campaignService.cancelApprovedCampaign(scopeUserId(req), req.params.id);
     return res.json({ success: true, data });
   } catch (error) {
     return httpError(res, error);
@@ -231,6 +256,8 @@ module.exports = {
   approveCampaign,
   rejectCampaign,
   updateCampaignLeads,
+  updateCampaign,
+  cancelCampaign,
   generateCampaignsNow,
   listOutbox,
 };

@@ -2,7 +2,7 @@ const WhatsAppOutbox = require('../models/WhatsAppOutbox');
 const WhatsAppSettings = require('../models/WhatsAppSettings');
 const Client = require('../models/Client');
 const wame = require('./wame.client');
-const { stripPhoneDigits, isValidBrazilianPhone } = require('../utils/phoneMatch');
+const { stripPhoneDigits, isValidBrazilianPhone, toNationalPhoneDigits } = require('../utils/phoneMatch');
 
 const FREQUENCY_CAP_MS = 24 * 60 * 60 * 1000;
 const MAX_BATCH = 80;
@@ -12,21 +12,21 @@ function firstName(fullName = '') {
   return parts[0] || fullName || 'cliente';
 }
 
+/**
+ * Contato recente = mesmo telefone (últimos 11 dígitos).
+ * Não usa clientId sozinho: o lead da campanha pode ter telefone diferente
+ * do cadastro e bloquearia o número certo após um envio no número errado.
+ */
 async function wasContactedRecently(userId, clientId, phone) {
   const since = new Date(Date.now() - FREQUENCY_CAP_MS);
-  const phoneDigits = stripPhoneDigits(phone);
-  const or = [];
-  if (clientId) or.push({ clientId });
-  if (phoneDigits.length >= 10) {
-    or.push({ phone: new RegExp(`${phoneDigits.slice(-11)}$`) });
-  }
-  if (!or.length) return false;
+  const phoneDigits = toNationalPhoneDigits(phone);
+  if (phoneDigits.length < 10) return false;
 
   const recent = await WhatsAppOutbox.findOne({
     userId,
     status: 'sent',
     sentAt: { $gte: since },
-    $or: or,
+    phone: new RegExp(`${phoneDigits}$`),
   })
     .select('_id')
     .lean();
@@ -131,7 +131,12 @@ async function processDueOutbox({ limit = MAX_BATCH } = {}) {
       continue;
     }
 
-    if (await wasContactedRecently(item.userId, item.clientId, item.phone)) {
+    // Campanhas aprovadas pelo usuário não entram no teto de 24h —
+    // senão a 2ª campanha do dia some como "Pulado" (frequency_cap).
+    if (
+      item.kind !== 'daily_campaign' &&
+      (await wasContactedRecently(item.userId, item.clientId, item.phone))
+    ) {
       item.status = 'skipped';
       item.error = 'frequency_cap_24h';
       item.lockedAt = null;
@@ -224,7 +229,7 @@ async function listOutbox(userId, { limit = 40, kind, campaignId } = {}) {
       id: String(row._id),
       status: row.status,
       phone: row.phone || '',
-      name: client?.name || row.meta?.clientName || '',
+      name: client?.name || row.meta?.name || row.meta?.clientName || '',
       message: row.message || '',
       kind: row.kind,
       scheduledAt: row.scheduledAt || null,
@@ -247,6 +252,69 @@ async function listCampaignDispatches(userId, campaignId, { limit = 100 } = {}) 
   });
 }
 
+function campaignDedupeKey(campaignId, lead) {
+  if (lead?.clientId) return `campaign:${campaignId}:${lead.clientId}`;
+  const digits = stripPhoneDigits(lead?.phone || '');
+  return `campaign:${campaignId}:p:${digits}`;
+}
+
+/**
+ * Cancela disparos reabríveis da campanha (libera dedupeKey para reenfileirar).
+ * Por padrão: pending. Também pode incluir skipped/failed após edição.
+ */
+async function cancelPendingForCampaign(userId, campaignId, { alsoStatuses = [] } = {}) {
+  if (!campaignId) return { cancelled: 0 };
+  const statuses = ['pending', ...alsoStatuses.filter((s) => s && s !== 'pending')];
+
+  // Libera chaves de cancelados antigos para permitir reenfileirar o mesmo contato.
+  await WhatsAppOutbox.updateMany(
+    { userId, campaignId, status: 'cancelled', dedupeKey: { $gt: '' } },
+    { $set: { dedupeKey: '' } }
+  );
+
+  // Reclaim sending travado (>5 min) como cancelável
+  const staleBefore = new Date(Date.now() - 5 * 60 * 1000);
+  await WhatsAppOutbox.updateMany(
+    {
+      userId,
+      campaignId,
+      status: 'sending',
+      lockedAt: { $lte: staleBefore },
+    },
+    {
+      $set: {
+        status: 'cancelled',
+        error: 'campaign_updated_stale_sending',
+        lockedAt: null,
+        dedupeKey: '',
+      },
+    }
+  );
+
+  const result = await WhatsAppOutbox.updateMany(
+    { userId, campaignId, status: { $in: statuses } },
+    {
+      $set: {
+        status: 'cancelled',
+        error: 'campaign_updated',
+        lockedAt: null,
+        dedupeKey: '',
+      },
+    }
+  );
+  return { cancelled: result.modifiedCount || 0 };
+}
+
+/**
+ * Lista itens pending/sent da campanha (para sincronizar edição pós-aprovação).
+ */
+async function listCampaignOutboxRaw(userId, campaignId) {
+  if (!campaignId) return [];
+  return WhatsAppOutbox.find({ userId, campaignId })
+    .select('status dedupeKey clientId phone message scheduledAt meta')
+    .lean();
+}
+
 module.exports = {
   FREQUENCY_CAP_MS,
   firstName,
@@ -255,4 +323,7 @@ module.exports = {
   processDueOutbox,
   listOutbox,
   listCampaignDispatches,
+  campaignDedupeKey,
+  cancelPendingForCampaign,
+  listCampaignOutboxRaw,
 };

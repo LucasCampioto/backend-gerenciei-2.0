@@ -1,6 +1,10 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { normalizeCampaignLeads } = require('./whatsappCampaign.service');
+const {
+  normalizeCampaignLeads,
+  clampSendAtToDateKey,
+  normalizeSuggestedSendAt,
+} = require('./whatsappCampaign.service');
 
 describe('normalizeCampaignLeads', () => {
   it('keeps valid name + brazilian phone and drops junk', () => {
@@ -39,5 +43,29 @@ describe('normalizeCampaignLeads', () => {
     ]);
     assert.equal(out[0].clientId, null);
     assert.equal(out[0].id, 'lead-local-xyz');
+  });
+});
+
+describe('clampSendAtToDateKey', () => {
+  it('forces AI wrong year onto campaign dateKey keeping SP clock', () => {
+    // 2023-08-27 18:00 America/Sao_Paulo
+    const raw = new Date('2023-08-27T21:00:00.000Z');
+    const out = clampSendAtToDateKey('2026-08-27', raw);
+    assert.ok(out);
+    assert.equal(out.toISOString(), '2026-08-27T21:00:00.000Z');
+  });
+
+  it('keeps 19:10 SP on the campaign day', () => {
+    const raw = new Date('2023-08-27T22:10:00.000Z');
+    const out = clampSendAtToDateKey('2026-08-27', raw);
+    assert.equal(out.toISOString(), '2026-08-27T22:10:00.000Z');
+  });
+});
+
+describe('normalizeSuggestedSendAt', () => {
+  it('rolls past times forward ~30 minutes', () => {
+    const out = normalizeSuggestedSendAt('2026-08-27', '2023-01-01T08:00:00.000Z', 0);
+    const delta = out.getTime() - Date.now();
+    assert.ok(delta >= 25 * 60 * 1000 && delta <= 35 * 60 * 1000);
   });
 });

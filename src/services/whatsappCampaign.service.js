@@ -83,6 +83,43 @@ function pickSendAt(dateKey, index = 0) {
   return new Date(Date.now() + 30 * 60 * 1000);
 }
 
+/**
+ * A IA às vezes devolve ano/data errados (ex.: 2023). Mantém o horário (SP)
+ * e força o dia da campanha (dateKey).
+ */
+function clampSendAtToDateKey(dateKey, raw) {
+  if (!dateKey || !raw) return null;
+  const parsed = raw instanceof Date ? raw : new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: CLINIC_TZ,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(parsed);
+  const hour = parts.find((p) => p.type === 'hour')?.value || '18';
+  const minute = parts.find((p) => p.type === 'minute')?.value || '00';
+  const clamped = new Date(`${dateKey}T${hour}:${minute}:00-03:00`);
+  if (Number.isNaN(clamped.getTime())) return null;
+  return clamped;
+}
+
+/**
+ * Normaliza horário para gravação/fila: dia da campanha + se já passou, daqui a 30 min.
+ */
+function normalizeSuggestedSendAt(dateKey, raw, index = 0) {
+  const fallback = () => pickSendAt(dateKey, index);
+  const clamped = clampSendAtToDateKey(dateKey, raw);
+  if (!clamped) return fallback();
+
+  // Se o horário do dia já passou há mais de 2 min, agenda daqui a 30 min
+  if (clamped.getTime() <= Date.now() + 2 * 60 * 1000) {
+    return new Date(Date.now() + 30 * 60 * 1000);
+  }
+  return clamped;
+}
+
 async function buildCampaignFacts(userId) {
   const userObjectId = new mongoose.Types.ObjectId(userId);
   const now = new Date();
@@ -444,9 +481,11 @@ async function persistDailyCampaigns(userId, drafts, { source = 'agent', agentRu
 
     if (variants.length < 2) continue;
 
-    const suggestedSendAt = draft.suggestedSendAt
-      ? new Date(draft.suggestedSendAt)
-      : pickSendAt(dateKey, prepared.length);
+    const suggestedSendAt = normalizeSuggestedSendAt(
+      dateKey,
+      draft.suggestedSendAt,
+      prepared.length
+    );
 
     prepared.push({
       userId,
@@ -664,16 +703,19 @@ async function ensureAgentDailyCampaigns(userId) {
 
 function serializeCampaignSummary(doc) {
   const obj = doc.toObject ? doc.toObject() : doc;
+  const dateKey = obj.dateKey || todayKeySp();
+  const suggested =
+    clampSendAtToDateKey(dateKey, obj.suggestedSendAt) || obj.suggestedSendAt || null;
   return {
     id: String(obj._id),
-    dateKey: obj.dateKey,
+    dateKey,
     status: obj.status,
     objective: obj.objective,
     title: obj.title,
     reason: obj.reason,
     audienceSummary: obj.audienceSummary,
     leadCount: (obj.leads && obj.leads.length ? obj.leads : obj.clientIds || []).length,
-    suggestedSendAt: obj.suggestedSendAt,
+    suggestedSendAt: suggested,
     source: obj.source,
     stats: obj.stats,
     selectedVariantId: obj.selectedVariantId,
@@ -777,23 +819,17 @@ async function approveCampaign(userId, campaignId, {
   doc.selectedVariantId = selected.id;
 
   if (sendAt) {
-    const parsed = new Date(sendAt);
-    if (!Number.isNaN(parsed.getTime())) doc.suggestedSendAt = parsed;
+    doc.suggestedSendAt = normalizeSuggestedSendAt(doc.dateKey, sendAt, 0);
   }
 
   const hasIncoming = Array.isArray(incomingLeads);
   let audience;
   if (hasIncoming || (Array.isArray(doc.leads) && doc.leads.length > 0)) {
-    audience = normalizeCampaignLeads(hasIncoming ? incomingLeads : doc.leads);
+    audience = await resolveAudienceLeads(hasIncoming ? incomingLeads : doc.leads);
     if (!audience.length) {
       const err = new Error('Inclua pelo menos um contato com nome e telefone válidos.');
       err.statusCode = 400;
       throw err;
-    }
-    for (const lead of audience) {
-      if (lead.clientId) continue;
-      const found = await findClientByPhone(Client, userId, lead.phone);
-      if (found) lead.clientId = String(found._id);
     }
     doc.leads = audience;
     doc.clientIds = audience
@@ -825,7 +861,12 @@ async function approveCampaign(userId, campaignId, {
     throw err;
   }
 
-  const scheduledAt = doc.suggestedSendAt || pickSendAt(doc.dateKey, 0);
+  const scheduledAt = normalizeSuggestedSendAt(
+    doc.dateKey,
+    doc.suggestedSendAt,
+    0
+  );
+  doc.suggestedSendAt = scheduledAt;
   let queued = 0;
   for (const lead of audience) {
     const message = String(selected.body)
@@ -878,6 +919,144 @@ async function rejectCampaign(userId, campaignId) {
   return serializeCampaignSummary(doc);
 }
 
+const EDITABLE_AFTER_APPROVAL = new Set(['approved', 'sending', 'done']);
+
+/**
+ * Cancela campanha já aprovada: remove da fila o que ainda não saiu.
+ * Mensagens já enviadas não são desfeitas.
+ */
+async function cancelApprovedCampaign(userId, campaignId) {
+  const doc = await WhatsAppCampaign.findOne({ _id: campaignId, userId });
+  if (!doc) {
+    const err = new Error('Campanha não encontrada');
+    err.statusCode = 404;
+    throw err;
+  }
+  if (!EDITABLE_AFTER_APPROVAL.has(doc.status)) {
+    const err = new Error(
+      doc.status === 'cancelled'
+        ? 'Campanha já está cancelada.'
+        : 'Só é possível cancelar campanhas aprovadas (ou em envio/concluídas com fila).'
+    );
+    err.statusCode = 409;
+    throw err;
+  }
+
+  const { cancelled } = await outbox.cancelPendingForCampaign(userId, doc._id, {
+    alsoStatuses: ['skipped', 'failed'],
+  });
+
+  doc.status = 'cancelled';
+  doc.cancelledAt = new Date();
+  doc.stats = doc.stats || {};
+  doc.stats.queued = 0;
+  await doc.save();
+
+  return {
+    ...serializeCampaignSummary(doc),
+    cancelledDispatches: cancelled,
+  };
+}
+
+async function resolveAudienceLeads(userId, rawLeads) {
+  const leads = normalizeCampaignLeads(rawLeads);
+  const clientIds = leads
+    .map((l) => l.clientId)
+    .filter((id) => id && mongoose.Types.ObjectId.isValid(id));
+  const clients = clientIds.length
+    ? await Client.find({ userId, _id: { $in: clientIds } })
+        .select('_id name phone')
+        .lean()
+    : [];
+  const byId = new Map(clients.map((c) => [String(c._id), c]));
+
+  for (const lead of leads) {
+    if (lead.clientId && byId.has(lead.clientId)) {
+      const client = byId.get(lead.clientId);
+      // Sempre preferir telefone atual do cadastro (evita número velho da IA).
+      if (client.phone && isValidBrazilianPhone(client.phone)) {
+        lead.phone = client.phone;
+      }
+      if (client.name) lead.name = client.name;
+      continue;
+    }
+    const found = await findClientByPhone(Client, userId, lead.phone);
+    if (found) {
+      lead.clientId = String(found._id);
+      if (found.phone && isValidBrazilianPhone(found.phone)) lead.phone = found.phone;
+    }
+  }
+  return leads;
+}
+
+function applyAudienceToDoc(doc, leads) {
+  doc.leads = leads;
+  doc.clientIds = leads
+    .map((l) => l.clientId)
+    .filter((id) => id && mongoose.Types.ObjectId.isValid(id));
+  const count = leads.length;
+  doc.audienceSummary = `${count} contato${count === 1 ? '' : 's'}`;
+}
+
+/**
+ * Reenfileira disparos após editar campanha já aprovada.
+ * - Reabre skipped/failed (ex.: frequency_cap) para o novo horário/texto
+ * - Não reenvia o que já saiu (sent)
+ */
+async function resyncApprovedOutbox(userId, doc, { selected, audience, scheduledAt }) {
+  await outbox.cancelPendingForCampaign(userId, doc._id, {
+    alsoStatuses: ['skipped', 'failed'],
+  });
+
+  const existing = await outbox.listCampaignOutboxRaw(userId, doc._id);
+  const alreadyHandled = new Set(
+    existing
+      .filter((row) => ['sent', 'sending'].includes(row.status))
+      .map((row) => String(row.dedupeKey || ''))
+      .filter(Boolean)
+  );
+
+  let queued = 0;
+  let skippedSent = 0;
+  for (const lead of audience) {
+    const dedupeKey = outbox.campaignDedupeKey(doc._id, lead);
+    if (alreadyHandled.has(dedupeKey)) {
+      skippedSent += 1;
+      continue;
+    }
+    const message = String(selected.body).replace(
+      /\{\{\s*nome\s*\}\}/gi,
+      outbox.firstName(lead.name)
+    );
+    const result = await outbox.enqueue({
+      userId,
+      clientId: lead.clientId || null,
+      phone: lead.phone,
+      message,
+      kind: 'daily_campaign',
+      scheduledAt,
+      campaignId: doc._id,
+      dedupeKey,
+      sourceRef: `whatsappCampaign:${doc._id}`,
+      meta: { objective: doc.objective, variantId: selected.id, name: lead.name },
+    });
+    if (result.queued) queued += 1;
+  }
+
+  const pendingLeft = await outbox.listCampaignOutboxRaw(userId, doc._id);
+  const pendingCount = pendingLeft.filter((r) => r.status === 'pending').length;
+  doc.stats = doc.stats || {};
+  doc.stats.queued = pendingCount;
+  if (pendingCount > 0) {
+    doc.status = 'approved';
+  } else if (EDITABLE_AFTER_APPROVAL.has(doc.status)) {
+    const hasSent = pendingLeft.some((r) => r.status === 'sent');
+    if (hasSent || skippedSent > 0) doc.status = 'done';
+  }
+
+  return { queued, skippedSent };
+}
+
 async function replaceCampaignLeads(userId, campaignId, rawLeads) {
   const doc = await WhatsAppCampaign.findOne({ _id: campaignId, userId });
   if (!doc) {
@@ -885,30 +1064,132 @@ async function replaceCampaignLeads(userId, campaignId, rawLeads) {
     err.statusCode = 404;
     throw err;
   }
-  if (doc.status !== 'pending_approval') {
-    const err = new Error('Só é possível editar contatos de campanhas pendentes.');
+  const isPending = doc.status === 'pending_approval';
+  const isApprovedEditable = EDITABLE_AFTER_APPROVAL.has(doc.status);
+  if (!isPending && !isApprovedEditable) {
+    const err = new Error('Só é possível editar contatos desta campanha enquanto estiver pendente ou aprovada.');
     err.statusCode = 409;
     throw err;
   }
 
-  const leads = normalizeCampaignLeads(rawLeads);
-  for (const lead of leads) {
-    if (lead.clientId) continue;
-    const found = await findClientByPhone(Client, userId, lead.phone);
-    if (found) lead.clientId = String(found._id);
+  const leads = await resolveAudienceLeads(userId, rawLeads);
+  if (isApprovedEditable && !leads.length) {
+    const err = new Error('Inclua pelo menos um contato com nome e telefone válidos.');
+    err.statusCode = 400;
+    throw err;
   }
 
-  doc.leads = leads;
-  doc.clientIds = leads
-    .map((l) => l.clientId)
-    .filter((id) => id && mongoose.Types.ObjectId.isValid(id));
-  const count = leads.length;
-  doc.audienceSummary = `${count} contato${count === 1 ? '' : 's'}`;
+  applyAudienceToDoc(doc, leads);
+
+  let sync = null;
+  if (isApprovedEditable) {
+    const selected =
+      doc.messageVariants.find((v) => v.id === doc.selectedVariantId) ||
+      doc.messageVariants[0];
+    if (!selected?.body) {
+      const err = new Error('Campanha sem mensagem válida para reenfileirar.');
+      err.statusCode = 400;
+      throw err;
+    }
+    const scheduledAt = normalizeSuggestedSendAt(
+      doc.dateKey,
+      doc.suggestedSendAt,
+      0
+    );
+    doc.suggestedSendAt = scheduledAt;
+    sync = await resyncApprovedOutbox(userId, doc, {
+      selected,
+      audience: leads,
+      scheduledAt,
+    });
+  }
+
   await doc.save();
 
   return {
     ...serializeCampaignSummary(doc),
     clients: publicClientsFromLeads(leads),
+    ...(sync || {}),
+  };
+}
+
+/**
+ * Atualiza texto, horário e/ou leads de campanha já aprovada e sincroniza a fila.
+ */
+async function updateApprovedCampaign(userId, campaignId, {
+  variantId,
+  sendAt,
+  editedMessages,
+  leads: incomingLeads,
+} = {}) {
+  const doc = await WhatsAppCampaign.findOne({ _id: campaignId, userId });
+  if (!doc) {
+    const err = new Error('Campanha não encontrada');
+    err.statusCode = 404;
+    throw err;
+  }
+  if (!EDITABLE_AFTER_APPROVAL.has(doc.status)) {
+    const err = new Error('Só é possível editar campanhas aprovadas (ou em envio/concluídas com fila).');
+    err.statusCode = 409;
+    throw err;
+  }
+
+  if (Array.isArray(editedMessages) && editedMessages.length) {
+    const byId = new Map(editedMessages.map((m) => [m.id, m.body]));
+    doc.messageVariants = doc.messageVariants.map((v) => {
+      if (byId.has(v.id) && String(byId.get(v.id) || '').trim()) {
+        return { ...(v.toObject?.() || v), body: String(byId.get(v.id)).trim() };
+      }
+      return v;
+    });
+  }
+
+  const selected =
+    doc.messageVariants.find((v) => v.id === (variantId || doc.selectedVariantId)) ||
+    doc.messageVariants[0];
+  if (!selected?.body) {
+    const err = new Error('Selecione uma variante de mensagem válida.');
+    err.statusCode = 400;
+    throw err;
+  }
+  doc.selectedVariantId = selected.id;
+
+  if (sendAt) {
+    doc.suggestedSendAt = normalizeSuggestedSendAt(doc.dateKey, sendAt, 0);
+  }
+
+  let audience;
+  if (Array.isArray(incomingLeads)) {
+    audience = await resolveAudienceLeads(userId, incomingLeads);
+    if (!audience.length) {
+      const err = new Error('Inclua pelo menos um contato com nome e telefone válidos.');
+      err.statusCode = 400;
+      throw err;
+    }
+    applyAudienceToDoc(doc, audience);
+  } else if (Array.isArray(doc.leads) && doc.leads.length) {
+    audience = normalizeCampaignLeads(doc.leads);
+  } else {
+    const err = new Error('Esta campanha não tem contatos para disparar.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const scheduledAt = normalizeSuggestedSendAt(doc.dateKey, doc.suggestedSendAt, 0);
+  doc.suggestedSendAt = scheduledAt;
+  const sync = await resyncApprovedOutbox(userId, doc, {
+    selected,
+    audience,
+    scheduledAt,
+  });
+  await doc.save();
+
+  const detail = await getCampaignDetail(userId, campaignId);
+  return {
+    ...detail,
+    queued: sync.queued,
+    skippedSent: sync.skippedSent,
+    scheduledAt,
   };
 }
 
@@ -941,8 +1222,12 @@ module.exports = {
   getCampaignDetail,
   approveCampaign,
   rejectCampaign,
+  cancelApprovedCampaign,
   replaceCampaignLeads,
+  updateApprovedCampaign,
   normalizeCampaignLeads,
+  normalizeSuggestedSendAt,
+  clampSendAtToDateKey,
   getHomeSummary,
   MAX_LEADS,
 };
