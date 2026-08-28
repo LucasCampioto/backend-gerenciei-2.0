@@ -5,6 +5,7 @@ const User = require('../models/User');
 const { getEvents } = require('./googleCalendar.service');
 const wame = require('./wame.client');
 const { stripPhoneDigits, isValidBrazilianPhone } = require('../utils/phoneMatch');
+const { normalizeName } = require('../utils/nameMatch');
 
 const CLINIC_TZ = 'America/Sao_Paulo';
 const TEST_RATE_LIMIT_MS = 30_000;
@@ -69,17 +70,6 @@ function formatDailyReminderTime() {
   return `${String(DAILY_REMINDER_HOUR_SP).padStart(2, '0')}:${String(DAILY_REMINDER_MINUTE_SP).padStart(2, '0')}`;
 }
 
-function normalizeName(value = '') {
-  return String(value)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/ç/g, 'c')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 function titleSegments(summary = '') {
   return String(summary)
     .split('/')
@@ -92,42 +82,6 @@ function eventFullNameHint(summary = '') {
   const segments = titleSegments(summary);
   if (segments.length > 0) return segments[0];
   return normalizeName(summary);
-}
-
-function preferClienteThenLonger(a, b) {
-  if (a.category === 'cliente' && b.category !== 'cliente') return -1;
-  if (b.category === 'cliente' && a.category !== 'cliente') return 1;
-  return normalizeName(b.name).length - normalizeName(a.name).length;
-}
-
-function matchScore(candidateName, hint) {
-  const name = normalizeName(candidateName);
-  const h = normalizeName(hint);
-  if (name.length < 3 || h.length < 3) return 0;
-
-  // Nome completo idêntico após normalização (Letícia = Leticia, maiúsculas, espaços).
-  if (name === h) return h.length + 200;
-
-  const nameWords = name.split(' ').filter(Boolean);
-  const hintWords = h.split(' ').filter(Boolean);
-
-  // Todos os tokens do hint (nome no evento) batem no cadastro — prioriza nome completo.
-  if (
-    hintWords.length >= 2 &&
-    hintWords.every((hw) => nameWords.some((nw) => nw === hw))
-  ) {
-    return hintWords.join(' ').length + 120;
-  }
-
-  if (name.includes(h) || h.includes(name)) {
-    return Math.min(name.length, h.length) + 50;
-  }
-
-  const prefixHit = hintWords.some(
-    (hw) =>
-      hw.length >= 4 && nameWords.some((nw) => nw.startsWith(hw) || hw.startsWith(nw))
-  );
-  return prefixHit ? Math.min(name.length, h.length) : 0;
 }
 
 function formatClinicDate(date) {
@@ -429,12 +383,13 @@ async function disconnect(userId) {
   return serializeSettings(settings);
 }
 
-async function matchClientForEvent(userId, summary) {
-  const clients = await Client.find({ userId }).select('_id name phone category').lean();
-  if (!clients.length) return null;
+/** Escolhe cliente pelo título do evento — match estrito por nome normalizado. */
+function pickClientByEventSummary(clients, summary) {
+  if (!clients?.length) return null;
 
-  const text = normalizeName(summary);
   const fullNameHint = eventFullNameHint(summary);
+  if (!fullNameHint || fullNameHint.length < 3) return null;
+
   const digits = String(summary || '').replace(/\D/g, '');
 
   // Telefone no título continua sendo o desempate mais seguro.
@@ -444,41 +399,16 @@ async function matchClientForEvent(userId, summary) {
   });
   if (byPhone) return byPhone;
 
-  // 1) Nome completo igual após normalização (acentos, case, espaços).
-  if (fullNameHint) {
-    const exactFull = clients
-      .filter((client) => normalizeName(client.name) === fullNameHint)
-      .sort(preferClienteThenLonger);
-    if (exactFull[0]) return exactFull[0];
-  }
+  const exactMatches = clients.filter(
+    (client) => normalizeName(client.name) === fullNameHint
+  );
+  if (exactMatches.length === 1) return exactMatches[0];
+  return null;
+}
 
-  // 2) Nome completo do cadastro contido no título do evento.
-  const contained = clients
-    .filter((client) => {
-      const name = normalizeName(client.name);
-      const words = name.split(' ').filter(Boolean);
-      // Exige nome composto (nome + sobrenome) para evitar falso positivo só com "Ana".
-      return words.length >= 2 && name.length >= 5 && text.includes(name);
-    })
-    .sort(preferClienteThenLonger);
-  if (contained[0]) return contained[0];
-
-  // 3) Fallback: score no trecho de nome do título (já normalizado).
-  const hints = fullNameHint ? [fullNameHint] : [];
-  let best = null;
-  let bestScore = 0;
-  for (const client of clients) {
-    for (const hint of hints) {
-      let score = matchScore(client.name, hint);
-      if (client.category === 'cliente') score += 5;
-      if (score > bestScore) {
-        best = client;
-        bestScore = score;
-      }
-    }
-  }
-  // Só aceita fallback forte (nome completo / contains), não só prefixo frouxo.
-  return bestScore >= 50 ? best : null;
+async function matchClientForEvent(userId, summary) {
+  const clients = await Client.find({ userId }).select('_id name phone category').lean();
+  return pickClientByEventSummary(clients, summary);
 }
 
 async function sendTestMessage(userId, { phone, nome } = {}) {
@@ -816,8 +746,9 @@ module.exports = {
   setInstanceKey,
   DEFAULT_FUNNEL_TEMPLATES: WhatsAppSettings.DEFAULT_FUNNEL_TEMPLATES,
   normalizeName,
-  matchScore,
   renderTemplate,
+  pickClientByEventSummary,
+  eventFullNameHint,
   matchClientForEvent,
   isEventBeforeDailyReminderDispatch,
   formatDailyReminderTime,

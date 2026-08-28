@@ -2,6 +2,7 @@ const Form = require('../models/Form');
 const FormResponse = require('../models/FormResponse');
 const Client = require('../models/Client');
 const { findClientByPhone, isValidBrazilianPhone, stripPhoneDigits } = require('../utils/phoneMatch');
+const { findClientByNormalizedName } = require('../utils/nameMatch');
 const { logActivity } = require('../services/clientActivity.service');
 const { isOtherAnswer, isChoiceAnswerEmpty } = require('../utils/choiceAnswer');
 
@@ -140,9 +141,20 @@ async function submitPublicResponse(req, res, next) {
     if (!client) {
       const normalizedPhone = stripPhoneDigits(phone);
       const formTitle = (form.title || 'Formulário').trim() || 'Formulário';
+      const leadName = typedName || 'Lead formulário';
+      if (typedName) {
+        const nameDuplicate = await findClientByNormalizedName(Client, form.userId, typedName);
+        if (nameDuplicate) {
+          return res.status(409).json({
+            success: false,
+            error: `Já existe um cadastro com este nome (${nameDuplicate.name}).`,
+            code: 'DUPLICATE_CLIENT_NAME',
+          });
+        }
+      }
       client = new Client({
         userId: form.userId,
-        name: typedName || 'Lead formulário',
+        name: leadName,
         phone: normalizedPhone,
         category: 'lead',
         isNewClient: true,
@@ -157,6 +169,16 @@ async function submitPublicResponse(req, res, next) {
       if (typedName) {
         const currentName = (client.name || '').trim();
         if (!currentName || currentName === 'Lead formulário') {
+          const nameDuplicate = await findClientByNormalizedName(Client, form.userId, typedName, {
+            excludeId: client._id,
+          });
+          if (nameDuplicate) {
+            return res.status(409).json({
+              success: false,
+              error: `Já existe um cadastro com este nome (${nameDuplicate.name}).`,
+              code: 'DUPLICATE_CLIENT_NAME',
+            });
+          }
           client.name = typedName;
           dirty = true;
         }

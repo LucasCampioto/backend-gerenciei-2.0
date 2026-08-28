@@ -11,6 +11,7 @@ const {
   isValidBrazilianPhone,
   stripPhoneDigits,
 } = require('../utils/phoneMatch');
+const { findClientByNormalizedName } = require('../utils/nameMatch');
 
 function formatClient(client) {
   const obj = client.toObject ? client.toObject() : client;
@@ -77,6 +78,16 @@ async function createClient(req, res, next) {
         success: false,
         error: 'Já existe um lead/cliente cadastrado com este telefone.',
         data: formatClient(duplicate),
+      });
+    }
+
+    const nameDuplicate = await findClientByNormalizedName(Client, scopeUserId(req), name);
+    if (nameDuplicate) {
+      return res.status(409).json({
+        success: false,
+        error: `Já existe um lead/cliente cadastrado com este nome (${nameDuplicate.name}).`,
+        code: 'DUPLICATE_CLIENT_NAME',
+        data: formatClient(nameDuplicate),
       });
     }
 
@@ -149,6 +160,18 @@ async function updateClient(req, res, next) {
         success: false,
         error: 'Já existe outro lead/cliente cadastrado com este telefone.',
         data: formatClient(duplicate),
+      });
+    }
+
+    const nameDuplicate = await findClientByNormalizedName(Client, scopeUserId(req), name, {
+      excludeId: existing._id,
+    });
+    if (nameDuplicate) {
+      return res.status(409).json({
+        success: false,
+        error: `Já existe outro lead/cliente cadastrado com este nome (${nameDuplicate.name}).`,
+        code: 'DUPLICATE_CLIENT_NAME',
+        data: formatClient(nameDuplicate),
       });
     }
 

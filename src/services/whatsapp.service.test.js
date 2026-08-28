@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const {
   renderTemplate,
   normalizeName,
-  matchScore,
+  pickClientByEventSummary,
   isEventBeforeDailyReminderDispatch,
   formatDailyReminderTime,
 } = require('./whatsapp.service');
@@ -34,15 +34,36 @@ describe('whatsapp.service normalizeName', () => {
   });
 });
 
-describe('whatsapp.service matchScore nome completo', () => {
-  it('casa Letícia com Leticia no nome completo', () => {
-    const score = matchScore('Letícia Pereira', 'leticia pereira');
-    assert.ok(score >= 200);
+describe('whatsapp.service pickClientByEventSummary', () => {
+  const clients = [
+    { _id: '1', name: 'Jaqueline Dantas', phone: '11986163972', category: 'cliente' },
+    { _id: '2', name: 'Jaqueline', phone: '11989619763', category: 'cliente' },
+    { _id: '3', name: 'Jaqueline Sampaio', phone: '11950805012', category: 'cliente' },
+  ];
+
+  it('casa nome composto exato do evento', () => {
+    const picked = pickClientByEventSummary(clients, 'Jaqueline Sampaio/design personalizado');
+    assert.equal(picked?.name, 'Jaqueline Sampaio');
   });
 
-  it('casa título com sobrenome parcial forte', () => {
-    const score = matchScore('Leticia Pereira Silva', 'Leticia Pereira');
-    assert.ok(score >= 120);
+  it('casa nome simples exato do evento', () => {
+    const picked = pickClientByEventSummary(clients, 'Jaqueline/consulta');
+    assert.equal(picked?.name, 'Jaqueline');
+  });
+
+  it('não envia para homônimo parcial quando agenda pede nome composto', () => {
+    const withoutSampaio = clients.filter((c) => c.name !== 'Jaqueline Sampaio');
+    const picked = pickClientByEventSummary(withoutSampaio, 'Jaqueline Sampaio/design');
+    assert.equal(picked, null);
+  });
+
+  it('retorna null quando há nomes duplicados normalizados', () => {
+    const duplicated = [
+      { _id: '1', name: 'Ana Silva', phone: '11911111111', category: 'cliente' },
+      { _id: '2', name: 'ANA   SILVA', phone: '11922222222', category: 'cliente' },
+    ];
+    const picked = pickClientByEventSummary(duplicated, 'Ana Silva/consulta');
+    assert.equal(picked, null);
   });
 });
 

@@ -29,6 +29,7 @@ const {
   resolveReadUrl,
 } = require('./simulation/r2Storage');
 const { findClientByPhone, isValidBrazilianPhone, stripPhoneDigits } = require('../utils/phoneMatch');
+const { findClientByNormalizedName } = require('../utils/nameMatch');
 const { logActivity } = require('./clientActivity.service');
 const {
   normalizeDiagnosisVariant,
@@ -2334,6 +2335,15 @@ async function submitPublicCampaignLead(slug, {
 
   let client = await findClientByPhone(Client, campaign.userId, phone);
   if (!client) {
+    if (typedName) {
+      const nameDuplicate = await findClientByNormalizedName(Client, campaign.userId, typedName);
+      if (nameDuplicate) {
+        const err = new Error(`Já existe um cadastro com este nome (${nameDuplicate.name}).`);
+        err.statusCode = 409;
+        err.code = 'DUPLICATE_CLIENT_NAME';
+        throw err;
+      }
+    }
     client = new Client({
       userId: campaign.userId,
       name: typedName || 'Lead campanha',
@@ -2350,6 +2360,15 @@ async function submitPublicCampaignLead(slug, {
   } else {
     let dirty = false;
     if (typedName && (!client.name || client.name.startsWith('Lead'))) {
+      const nameDuplicate = await findClientByNormalizedName(Client, campaign.userId, typedName, {
+        excludeId: client._id,
+      });
+      if (nameDuplicate) {
+        const err = new Error(`Já existe um cadastro com este nome (${nameDuplicate.name}).`);
+        err.statusCode = 409;
+        err.code = 'DUPLICATE_CLIENT_NAME';
+        throw err;
+      }
       client.name = typedName;
       dirty = true;
     }

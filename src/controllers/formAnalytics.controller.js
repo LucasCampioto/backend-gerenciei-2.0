@@ -4,6 +4,7 @@ const Client = require('../models/Client');
 const mongoose = require('mongoose');
 const { formatChoiceDisplayValue, normalizeChoiceForAnalytics } = require('../utils/choiceAnswer');
 const { findClientByPhone, stripPhoneDigits } = require('../utils/phoneMatch');
+const { findClientByNormalizedName } = require('../utils/nameMatch');
 const { logActivity } = require('../services/clientActivity.service');
 const { tenantFilter, tenantDocFilter, tenantCreateFields, scopeUserId } = require('../utils/tenantScope');
 
@@ -305,6 +306,19 @@ async function convertResponseToClient(req, res, next) {
         return res.status(400).json({
           success: false,
           error: 'Não há telefone nesta resposta para recriar o cadastro',
+        });
+      }
+
+      const nameDuplicate = await findClientByNormalizedName(
+        Client,
+        scopeUserId(req),
+        requestedName
+      );
+      if (nameDuplicate) {
+        return res.status(409).json({
+          success: false,
+          error: `Já existe um cadastro com este nome (${nameDuplicate.name}).`,
+          code: 'DUPLICATE_CLIENT_NAME',
         });
       }
 
