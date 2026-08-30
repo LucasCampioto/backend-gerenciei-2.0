@@ -246,6 +246,52 @@ async function downloadDocument(req, res, next) {
   }
 }
 
+async function updateDocument(req, res, next) {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        error: 'ID inválido',
+      });
+    }
+
+    const document = await Document.findOne({
+      _id: id,
+      ...tenantFilter(req),
+    });
+
+    if (!document) {
+      return res.status(404).json({
+        success: false,
+        error: 'Documento não encontrado',
+      });
+    }
+
+    if (req.body.title !== undefined) {
+      const nextTitle = String(req.body.title || '').trim();
+      if (nextTitle.length > 200) {
+        return res.status(400).json({
+          success: false,
+          error: 'Título muito longo (máx. 200 caracteres)',
+        });
+      }
+      document.title = nextTitle || undefined;
+    }
+
+    await document.save();
+
+    res.json({
+      success: true,
+      data: formatDocument(document),
+      message: 'Documento atualizado',
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function deleteS3IfPresent(url) {
   if (!isS3Available() || !s3Client) return;
   if (!url || !url.includes('amazonaws.com')) return;
@@ -302,6 +348,7 @@ async function deleteDocument(req, res, next) {
 module.exports = {
   getAllDocuments,
   createDocument,
+  updateDocument,
   downloadDocument,
   deleteDocument,
   formatDocument,

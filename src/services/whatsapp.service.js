@@ -170,6 +170,12 @@ function serializeSettings(settings) {
       settings.noShowFollowUpTemplate ||
       WhatsAppSettings.DEFAULT_NO_SHOW_FOLLOW_UP_TEMPLATE,
     defaultNoShowFollowUpTemplate: WhatsAppSettings.DEFAULT_NO_SHOW_FOLLOW_UP_TEMPLATE,
+    inactiveReturnEnabled: Boolean(settings.inactiveReturnEnabled),
+    inactiveReturnTemplate:
+      settings.inactiveReturnTemplate ||
+      WhatsAppSettings.DEFAULT_INACTIVE_RETURN_TEMPLATE,
+    defaultInactiveReturnTemplate: WhatsAppSettings.DEFAULT_INACTIVE_RETURN_TEMPLATE,
+    inactiveReturnDays: WhatsAppSettings.INACTIVE_RETURN_DAYS,
     updatedAt: settings.updatedAt,
   };
 }
@@ -237,6 +243,25 @@ async function updateSettings(userId, payload = {}) {
       throw err;
     }
     settings.noShowFollowUpTemplate = next;
+  }
+  if (payload.inactiveReturnEnabled !== undefined) {
+    settings.inactiveReturnEnabled = Boolean(payload.inactiveReturnEnabled);
+  }
+  if (payload.inactiveReturnTemplate !== undefined) {
+    const next = String(payload.inactiveReturnTemplate || '').trim();
+    if (!next) {
+      const err = new Error('Template de retorno de inativos não pode ficar vazio.');
+      err.statusCode = 400;
+      throw err;
+    }
+    if (next.length > 2000) {
+      const err = new Error(
+        'Template de retorno de inativos muito longo (máx. 2000 caracteres).',
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+    settings.inactiveReturnTemplate = next;
   }
   if (payload.funnelTemplates && typeof payload.funnelTemplates === 'object') {
     const next = mergeFunnelTemplates(settings.funnelTemplates);
@@ -707,12 +732,20 @@ async function processReminders() {
         return { processed: 0, queued: 0, skipped: 0, error: error.message };
       });
 
+    const inactiveReturn = await require('./whatsappInactiveReturn.service')
+      .processInactiveReturnFollowUps()
+      .catch((error) => {
+        console.warn('[whatsapp] inactive return failed:', error.message);
+        return { processed: 0, queued: 0, skipped: 0, error: error.message };
+      });
+
     return {
       processedUsers: results.length,
       results,
       outbox,
       simulationSweep,
       noShowFollowUp,
+      inactiveReturn,
     };
   } finally {
     await releaseLock(lockId, owner);

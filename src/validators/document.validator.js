@@ -33,6 +33,11 @@ const documentSchema = Joi.object({
   return value;
 });
 
+const documentUpdateSchema = Joi.object({
+  title: Joi.string().trim().allow('').max(200).required(),
+});
+
 module.exports = {
-  documentSchema
+  documentSchema,
+  documentUpdateSchema,
 };

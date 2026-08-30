@@ -7,6 +7,7 @@ const KINDS = [
   'agenda_reminder',
   'simulation_invite',
   'agenda_noshow',
+  'inactive_return',
   'test',
 ];
 

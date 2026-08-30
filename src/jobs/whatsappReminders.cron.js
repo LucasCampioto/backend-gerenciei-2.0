@@ -25,10 +25,11 @@ async function tick() {
     const outbox = data.outbox || {};
     const sim = data.simulationSweep || {};
     const noshow = data.noShowFollowUp || {};
+    const inactive = data.inactiveReturn || {};
     console.log(
       `[whatsapp-cron] users=${data.processedUsers || 0} remindersSent=${sent} remindersFailed=${failed} ` +
         `outboxSent=${outbox.sent || 0} outboxFailed=${outbox.failed || 0} outboxSkipped=${outbox.skipped || 0} ` +
-        `simQueued=${sim.queued || 0} noShowQueued=${noshow.queued || 0}`
+        `simQueued=${sim.queued || 0} noShowQueued=${noshow.queued || 0} inactiveQueued=${inactive.queued || 0}`
     );
   } catch (error) {
     console.warn('[whatsapp-cron] falha:', error.message);
