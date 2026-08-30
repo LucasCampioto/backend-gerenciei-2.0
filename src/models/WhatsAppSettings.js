@@ -10,6 +10,12 @@ const DEFAULT_SIMULATION_INVITE_TEMPLATE =
 const DEFAULT_NO_SHOW_FOLLOW_UP_TEMPLATE =
   'Olá {{nome}}! Sentimos sua falta no horário de {{data}} às {{horario}}. Quer que eu te ajude a remarcar? Me conta qual dia fica melhor pra você.';
 
+const DEFAULT_INACTIVE_RETURN_TEMPLATE =
+  'Olá {{nome}}! Faz {{dias}} dias desde sua última visita ({{data}}). Que tal agendar um retorno? Estou à disposição por aqui.';
+
+/** Dias sem compra para disparar retorno de inativos. */
+const INACTIVE_RETURN_DAYS = 30;
+
 const DEFAULT_FUNNEL_TEMPLATES = {
   ebook:
     'Olá {{nome}}! Seu material da campanha "{{campanha}}" já está disponível. Se quiser, me chama que eu te ajudo com o próximo passo.',
@@ -96,6 +102,15 @@ const whatsAppSettingsSchema = new mongoose.Schema(
       trim: true,
       default: DEFAULT_NO_SHOW_FOLLOW_UP_TEMPLATE,
     },
+    inactiveReturnEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    inactiveReturnTemplate: {
+      type: String,
+      trim: true,
+      default: DEFAULT_INACTIVE_RETURN_TEMPLATE,
+    },
     lastTestSentAt: {
       type: Date,
       default: null,
@@ -120,6 +135,9 @@ whatsAppSettingsSchema.statics.DEFAULT_SIMULATION_INVITE_TEMPLATE =
   DEFAULT_SIMULATION_INVITE_TEMPLATE;
 whatsAppSettingsSchema.statics.DEFAULT_NO_SHOW_FOLLOW_UP_TEMPLATE =
   DEFAULT_NO_SHOW_FOLLOW_UP_TEMPLATE;
+whatsAppSettingsSchema.statics.DEFAULT_INACTIVE_RETURN_TEMPLATE =
+  DEFAULT_INACTIVE_RETURN_TEMPLATE;
+whatsAppSettingsSchema.statics.INACTIVE_RETURN_DAYS = INACTIVE_RETURN_DAYS;
 whatsAppSettingsSchema.statics.DEFAULT_FUNNEL_TEMPLATES = DEFAULT_FUNNEL_TEMPLATES;
 whatsAppSettingsSchema.statics.FUNNEL_TEMPLATE_KEYS = FUNNEL_TEMPLATE_KEYS;
 

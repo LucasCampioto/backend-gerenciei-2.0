@@ -114,6 +114,14 @@ async function processRemindersCron(req, res) {
             ...(data.noShowFollowUp.error ? { error: true } : {}),
           }
         : undefined,
+      inactiveReturn: data?.inactiveReturn
+        ? {
+            processed: data.inactiveReturn.processed ?? 0,
+            queued: data.inactiveReturn.queued ?? 0,
+            skipped: data.inactiveReturn.skipped ?? 0,
+            ...(data.inactiveReturn.error ? { error: true } : {}),
+          }
+        : undefined,
     };
     return res.json({ success: true, data: summary });
   } catch (error) {
