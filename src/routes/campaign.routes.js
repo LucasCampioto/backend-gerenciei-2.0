@@ -7,6 +7,7 @@ const {
   stats,
   create,
   themeSuggestions,
+  topicCorrelations,
   generate,
   update,
   publish,
@@ -20,6 +21,7 @@ router.use(authenticate);
 router.get('/', list);
 router.post('/', create);
 router.post('/theme-suggestions', themeSuggestions);
+router.post('/topic-correlations', topicCorrelations);
 router.get('/:id/stats', stats);
 router.delete('/:id/leads/:leadId', removeLead);
 router.post('/:id/leads/:leadId/generate-simulation', generateLeadSimulation);

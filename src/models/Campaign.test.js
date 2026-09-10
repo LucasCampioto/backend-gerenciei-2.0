@@ -46,6 +46,16 @@ test('Campaign preserva integralmente o conteúdo rico (eBook, landing, quiz, ad
   );
 });
 
+test('Campaign aceita leadMagnetType diy', () => {
+  const doc = new Campaign({
+    userId: new mongoose.Types.ObjectId(),
+    title: 'Campanha DIY',
+    publicSlug: 'slug-diy',
+    leadMagnetType: 'diy',
+  });
+  assert.equal(doc.validateSync(), undefined);
+});
+
 test('Campaign rejeita leadMagnetType inválido', () => {
   const doc = new Campaign({
     userId: new mongoose.Types.ObjectId(),

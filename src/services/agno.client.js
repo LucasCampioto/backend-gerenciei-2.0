@@ -14,6 +14,7 @@ const FEATURE_BY_PATH = {
   '/commercial/campaign': 'campaign',
   '/commercial/campaign-quiz': 'campaign_quiz',
   '/commercial/campaign-magnet': 'campaign_magnet',
+  '/commercial/topic-correlations': 'topic_correlations',
   '/commercial/diagnosis-personalize': 'diagnosis_personalize',
   '/commercial/content-calendar': 'content_calendar',
   '/commercial/whatsapp-campaigns': 'whatsapp_campaigns',
@@ -129,6 +130,10 @@ async function suggestCampaignThemes(payload) {
   return callAgno('/commercial/campaign-themes', payload, { timeoutMs: 45000 });
 }
 
+async function suggestTopicCorrelations(payload) {
+  return callAgno('/commercial/topic-correlations', payload, { timeoutMs: 20000 });
+}
+
 async function generateCampaign(payload) {
   // Workflow editorial em etapas (arquitetura + escrita em lotes + crítica +
   // marketing) faz várias chamadas ao modelo — budget generoso
@@ -189,6 +194,7 @@ module.exports = {
   prepareLead,
   generateReactivation,
   suggestCampaignThemes,
+  suggestTopicCorrelations,
   generateCampaign,
   generateQuizCampaign,
   generateMagnetCampaign,

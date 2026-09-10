@@ -5,6 +5,7 @@ const {
   getCampaignStats,
   createCampaign,
   suggestCampaignThemes,
+  suggestTopicCorrelations,
   generateCampaignContent,
   updateCampaign,
   publishCampaign,
@@ -65,6 +66,18 @@ async function create(req, res, next) {
 async function themeSuggestions(req, res, next) {
   try {
     const data = await suggestCampaignThemes(scopeUserId(req), req.body || {});
+    res.json({ success: true, data });
+  } catch (error) {
+    if ([400, 502, 503].includes(error.statusCode)) {
+      return res.status(error.statusCode).json({ success: false, error: error.message });
+    }
+    next(error);
+  }
+}
+
+async function topicCorrelations(req, res, next) {
+  try {
+    const data = await suggestTopicCorrelations(scopeUserId(req), req.body || {});
     res.json({ success: true, data });
   } catch (error) {
     if ([400, 502, 503].includes(error.statusCode)) {
@@ -227,6 +240,7 @@ module.exports = {
   stats,
   create,
   themeSuggestions,
+  topicCorrelations,
   generate,
   update,
   publish,

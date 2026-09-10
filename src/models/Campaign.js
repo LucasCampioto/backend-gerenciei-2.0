@@ -19,7 +19,8 @@ const { organizationScopePlugin } = require('./plugins/organizationScope');
  * - quiz:    { title, promise, screens[{id, type: intro|question|bridge|capture|result,
  *              title, body, buttonText, question{kind, options[{label, weights{}}], scaleMin, scaleMax},
  *              nextScreenId}], resultProfiles[{id, title, description, recommendation, ctaText}] }
- * - checklist: { title, subtitle, intro, items[{text, tip?}], disclaimer }
+ * - tutorial: { title, subtitle, intro, steps[{title, body, tip?, materials?[]}], disclaimer }
+ * - checklist: legado — migrado on-read para tutorial
  * - calculator: { title, subtitle, intro, inputs[], packages[], disclaimer }
  * - evaluation: { title, subtitle, weekLabel, intro, slots[], formTitle, ctaText, successNote }
  * - adCreatives[{headline, primaryText, cta, format: post|story, visualSuggestion}]
@@ -68,7 +69,7 @@ const campaignSchema = new mongoose.Schema(
     /** Tipo da isca digital da campanha. */
     leadMagnetType: {
       type: String,
-      enum: ['ebook', 'quiz', 'checklist', 'diagnosis', 'calculator', 'evaluation'],
+      enum: ['ebook', 'quiz', 'checklist', 'diy', 'diagnosis', 'calculator', 'evaluation'],
       default: 'ebook',
     },
     /** WhatsApp da clínica para CTAs públicos (falar no WhatsApp). */

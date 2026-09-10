@@ -21,8 +21,10 @@ const DEFAULT_FUNNEL_TEMPLATES = {
     'Olá {{nome}}! Seu material da campanha "{{campanha}}" já está disponível. Se quiser, me chama que eu te ajudo com o próximo passo.',
   quiz:
     'Olá {{nome}}! Vi o resultado do seu quiz em "{{campanha}}". Quer que eu te explique o perfil e o melhor caminho pra você?',
+  diy:
+    'Olá {{nome}}! Seu tutorial de "{{campanha}}" está pronto. Posso te ajudar com o próximo passo?',
   checklist:
-    'Olá {{nome}}! Seu checklist de "{{campanha}}" está pronto. Posso te ajudar a priorizar o que faz mais sentido agora?',
+    'Olá {{nome}}! Seu tutorial de "{{campanha}}" está pronto. Posso te ajudar com o próximo passo?',
   diagnosis:
     'Olá {{nome}}! Li o retorno da sua avaliação em "{{campanha}}". Quer que eu te oriente no próximo passo?',
   calculator:
@@ -40,6 +42,7 @@ const funnelTemplatesSchema = new mongoose.Schema(
     ebook: { type: String, default: DEFAULT_FUNNEL_TEMPLATES.ebook },
     quiz: { type: String, default: DEFAULT_FUNNEL_TEMPLATES.quiz },
     checklist: { type: String, default: DEFAULT_FUNNEL_TEMPLATES.checklist },
+    diy: { type: String, default: DEFAULT_FUNNEL_TEMPLATES.diy },
     diagnosis: { type: String, default: DEFAULT_FUNNEL_TEMPLATES.diagnosis },
     calculator: { type: String, default: DEFAULT_FUNNEL_TEMPLATES.calculator },
     evaluation: { type: String, default: DEFAULT_FUNNEL_TEMPLATES.evaluation },

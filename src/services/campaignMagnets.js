@@ -7,17 +7,19 @@ const LEAD_MAGNET_TYPES = [
   'ebook',
   'quiz',
   'checklist',
+  'diy',
   'diagnosis',
   'calculator',
   'evaluation',
 ];
 
 const FUNNEL_TYPES = new Set(['quiz', 'diagnosis']);
-const LANDING_TYPES = new Set(['ebook', 'checklist', 'calculator', 'evaluation']);
-const PDF_TYPES = new Set(['ebook', 'checklist']);
+const LANDING_TYPES = new Set(['ebook', 'checklist', 'diy', 'calculator', 'evaluation']);
+const PDF_TYPES = new Set(['ebook', 'checklist', 'diy']);
 
 function normalizeLeadMagnetType(value) {
   const t = String(value || 'ebook').toLowerCase().trim();
+  if (t === 'checklist') return 'diy';
   return LEAD_MAGNET_TYPES.includes(t) ? t : 'ebook';
 }
 
@@ -108,6 +110,63 @@ function baseAds(topic, angle) {
   ];
 }
 
+function heuristicTutorialContent(topic) {
+  const t = topic || 'estética';
+  const steps = [
+    {
+      title: 'Defina o objetivo com clareza',
+      body: `Antes de começar, escreva em uma frase o resultado que você busca com ${t}. Isso evita exageros e ajuda a comparar referências.`,
+      tip: 'Use fotos de referência do que você gosta e do que não gosta.',
+    },
+    {
+      title: 'Prepare o ambiente e os materiais',
+      body: 'Organize espelho com boa luz, materiais limpos e tempo sem interrupções. Um passo bem feito vale mais que pressa.',
+      materials: ['Espelho', 'Boa iluminação', 'Materiais adequados ao procedimento'],
+    },
+    {
+      title: 'Mapeie o ponto de partida',
+      body: `Observe com calma a área de trabalho antes de ${t}. Marque mentalmente o que precisa de atenção e o que já está bom.`,
+      tip: 'Fotografe antes para comparar depois com honestidade.',
+    },
+    {
+      title: 'Execute o primeiro passo com leveza',
+      body: 'Comece pelo movimento mais simples e reversível. Menos é mais: ajuste aos poucos em vez de corrigir exagero depois.',
+    },
+    {
+      title: 'Revise simetria e proporção',
+      body: 'Afaste-se do espelho, volte e observe de longe. Pequenos desvios aparecem melhor com essa distância.',
+      tip: 'Se algo não ficou como esperava, pare e reavalie antes de insistir.',
+    },
+    {
+      title: 'Finalize e registre o resultado',
+      body: 'Guarde uma foto do resultado e anote o que funcionou. Isso ajuda na próxima vez e na conversa com a profissional.',
+    },
+    {
+      title: 'Combine o próximo passo com a clínica',
+      body: 'Se fizer sentido, leve suas dúvidas e referências para uma avaliação. O tutorial orienta; a especialista personaliza.',
+    },
+  ];
+  return {
+    tutorial: {
+      title: `Tutorial passo a passo: ${t}`,
+      subtitle: 'Faça você mesmo com segurança',
+      intro: 'Siga cada passo na ordem. Pare se sentir desconforto e busque orientação profissional.',
+      steps,
+      disclaimer: 'Conteúdo educativo. Não substitui avaliação presencial nem indicação clínica.',
+    },
+    landing: baseLanding(t, {
+      heroHeadline: `Tutorial gratuito: ${t}`,
+      heroSubheadline: 'Passo a passo prático para fazer com mais confiança.',
+      formTitle: 'Receba o tutorial no WhatsApp',
+      ctaText: 'Quero o tutorial',
+      learnItems: steps.slice(0, 4).map((s) => s.title),
+    }),
+    adCreatives: baseAds(t, 'Tutorial passo a passo para fazer em casa'),
+    audienceSuggestion: `Pessoas que querem aprender ${t} antes de ir à clínica.`,
+  };
+}
+
+/** Legado: mantido para migração on-read. */
 function heuristicChecklistContent(topic) {
   const t = topic || 'estética';
   const items = [
@@ -586,8 +645,8 @@ function heuristicEvaluationContent(topic) {
 
 function heuristicMagnetContent(leadMagnetType, topic, procedures = []) {
   switch (normalizeLeadMagnetType(leadMagnetType)) {
-    case 'checklist':
-      return heuristicChecklistContent(topic);
+    case 'diy':
+      return heuristicTutorialContent(topic);
     case 'diagnosis':
       return heuristicDiagnosisContent(topic);
     case 'calculator':
@@ -599,21 +658,49 @@ function heuristicMagnetContent(leadMagnetType, topic, procedures = []) {
   }
 }
 
-/** Converte checklist em shape de eBook para reutilizar o gerador de PDF. */
-function checklistToEbookPdfShape(checklist) {
+function migrateChecklistToTutorial(checklist) {
   if (!checklist) return null;
   return {
-    title: checklist.title || 'Checklist',
+    title: checklist.title || 'Tutorial',
     subtitle: checklist.subtitle || '',
-    coverTagline: 'Checklist prático',
-    sections: (checklist.items || []).map((item, i) => ({
-      heading: `${i + 1}. ${item.text}`,
-      body: item.tip || 'Marque quando concluir este item.',
-      bullets: item.tip ? [item.tip] : [],
-      tip: item.tip || '',
+    intro: checklist.intro || '',
+    steps: (checklist.items || []).map((item) => ({
+      title: item.text || '',
+      body: item.tip || 'Siga com calma e revise antes de avançar.',
+      tip: item.tip || undefined,
     })),
     disclaimer: checklist.disclaimer || '',
   };
+}
+
+function resolveTutorialContent(content) {
+  if (!content) return null;
+  if (content.tutorial?.steps?.length) return content.tutorial;
+  if (content.checklist?.items?.length) return migrateChecklistToTutorial(content.checklist);
+  return null;
+}
+
+/** Converte tutorial em shape de eBook para reutilizar o gerador de PDF. */
+function tutorialToEbookPdfShape(tutorial) {
+  if (!tutorial) return null;
+  return {
+    title: tutorial.title || 'Tutorial',
+    subtitle: tutorial.subtitle || '',
+    coverTagline: 'Passo a passo prático',
+    sections: (tutorial.steps || []).map((step, i) => ({
+      heading: `Passo ${i + 1}: ${step.title}`,
+      body: step.body || '',
+      bullets: Array.isArray(step.materials) ? step.materials : step.tip ? [step.tip] : [],
+      tip: step.tip || '',
+    })),
+    disclaimer: tutorial.disclaimer || '',
+  };
+}
+
+/** Converte checklist legado em shape de eBook para reutilizar o gerador de PDF. */
+function checklistToEbookPdfShape(checklist) {
+  if (!checklist) return null;
+  return tutorialToEbookPdfShape(migrateChecklistToTutorial(checklist));
 }
 
 function isFunnelMagnet(type) {
@@ -631,12 +718,25 @@ function contentIsComplete(leadMagnetType, content) {
   if (t === 'quiz' || t === 'diagnosis') {
     return Boolean(content.quiz?.screens?.length && content.quiz?.resultProfiles?.length);
   }
-  if (t === 'checklist') return Boolean(content.checklist?.items?.length);
+  if (t === 'diy') {
+    const tutorial = resolveTutorialContent(content);
+    return Boolean(tutorial?.steps?.length >= 4);
+  }
   if (t === 'calculator') {
     return Boolean(content.calculator?.inputs?.length && content.calculator?.packages?.length);
   }
   if (t === 'evaluation') return Boolean(content.evaluation?.slots?.length);
   return Boolean(content.landing?.heroHeadline || content.landing?.headline);
+}
+
+function normalizeMagnetContentFromAgno(content, leadMagnetType) {
+  if (!content) return content;
+  const type = normalizeLeadMagnetType(leadMagnetType);
+  if (type === 'diy') {
+    const tutorial = resolveTutorialContent(content);
+    if (tutorial) return { ...content, tutorial };
+  }
+  return content;
 }
 
 module.exports = {
@@ -648,10 +748,15 @@ module.exports = {
   isFunnelMagnet,
   needsPdf,
   contentIsComplete,
+  normalizeMagnetContentFromAgno,
   heuristicMagnetContent,
+  resolveTutorialContent,
+  migrateChecklistToTutorial,
+  tutorialToEbookPdfShape,
   checklistToEbookPdfShape,
   proceduresForTopic,
   heuristicChecklistContent,
+  heuristicTutorialContent,
   heuristicDiagnosisContent,
   heuristicCalculatorContent,
   heuristicEvaluationContent,

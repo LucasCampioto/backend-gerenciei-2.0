@@ -50,3 +50,16 @@ test('buildQualityReport não gera avisos narrativos para o golden fixture de la
   assert.ok(!report.warnings.some((w) => w.includes('blocos narrativos')));
   assert.ok(!report.warnings.some((w) => w.includes('2 Feed + 1 Story')));
 });
+
+test('buildQualityReport avisa tutorial DIY com poucos passos', () => {
+  const weak = {
+    tutorial: {
+      title: 'Tutorial',
+      steps: [{ title: 'A', body: 'x' }, { title: 'B', body: 'y' }],
+    },
+    landing: richCampaignContent.landing,
+    adCreatives: richCampaignContent.adCreatives,
+  };
+  const report = buildQualityReport(weak, 'diy');
+  assert.ok(report.warnings.some((w) => w.includes('passos')));
+});

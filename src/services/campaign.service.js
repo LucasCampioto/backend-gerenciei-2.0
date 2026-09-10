@@ -10,6 +10,7 @@ const {
   generateQuizCampaign,
   generateMagnetCampaign,
   suggestCampaignThemes: agnoSuggestThemes,
+  suggestTopicCorrelations: agnoSuggestTopicCorrelations,
   personalizeDiagnosisLaudo: agnoPersonalizeDiagnosisLaudo,
   healthCheck,
 } = require('./agno.client');
@@ -20,9 +21,17 @@ const {
   needsPdf,
   contentIsComplete,
   heuristicMagnetContent,
-  checklistToEbookPdfShape,
+  tutorialToEbookPdfShape,
+  resolveTutorialContent,
+  migrateChecklistToTutorial,
+  normalizeMagnetContentFromAgno,
   proceduresForTopic,
 } = require('./campaignMagnets');
+const {
+  filterDuplicateThemes,
+  filterDuplicateLabels,
+  uniqueLabels,
+} = require('./campaignThemeDedup');
 const {
   isR2Configured,
   putObject,
@@ -748,28 +757,28 @@ function sanitizeQuizScaleScreens(content) {
   return { ...content, quiz: { ...content.quiz, screens } };
 }
 
-/* ---------- Checklist / Avaliação / eBook / Quiz: temas alinhados ao tipo ---------- */
+/* ---------- DIY / Avaliação / eBook / Quiz: temas alinhados ao tipo ---------- */
 
-const CHECKLIST_ANGLE_POOL = [
+const DIY_ANGLE_POOL = [
   {
-    id: 'before_decide',
-    hint: 'o que verificar antes de decidir',
-    titleHint: 'Checklist: o que checar antes de {t}',
+    id: 'step_by_step',
+    hint: 'tutorial passo a passo prático',
+    titleHint: 'Passo a passo: como fazer {t}',
   },
   {
-    id: 'questions',
-    hint: 'perguntas para levar na avaliação',
-    titleHint: 'Checklist de perguntas para sua avaliação de {t}',
+    id: 'at_home',
+    hint: 'como fazer em casa com segurança',
+    titleHint: 'Como fazer {t} em casa (tutorial)',
   },
   {
-    id: 'red_flags',
-    hint: 'sinais de alerta ao escolher profissional/clínica',
-    titleHint: 'Checklist: sinais de alerta antes de marcar {t}',
+    id: 'visual_guide',
+    hint: 'guia visual com sequência clara',
+    titleHint: 'Tutorial visual de {t}',
   },
   {
-    id: 'prepare',
-    hint: 'como se preparar no dia / na semana',
-    titleHint: 'Checklist rápido: prepare-se para {t}',
+    id: 'mistakes',
+    hint: 'erros comuns e como evitar',
+    titleHint: 'Tutorial: erros comuns em {t} e como evitar',
   },
 ];
 
@@ -850,12 +859,16 @@ function themeBlob(theme) {
   return `${theme?.title || ''} ${theme?.description || ''} ${theme?.promise || ''} ${theme?.adHook || ''}`;
 }
 
-function isChecklistThemeOk(theme) {
+function isDiyThemeOk(theme) {
   const blob = themeBlob(theme);
-  if (/laudo|diagn[oó]stico|selfie|antes\s*\/?\s*depois|calcule sua faixa|pacote essencial|fila de avalia|vagas desta semana/i.test(blob)) {
+  if (
+    /laudo|diagn[oó]stico|selfie|antes\s*\/?\s*depois|calcule sua faixa|pacote essencial|fila de avalia|vagas desta semana/i.test(
+      blob
+    )
+  ) {
     return false;
   }
-  return /checklist|lista|marque|itens|verificar|checar|perguntas para|prepare-se|sinais de alerta|antes de/i.test(
+  return /tutorial|passo a passo|como fazer|faça você|faça voce|guia prático|em casa|erros comuns|faça você mesmo/i.test(
     blob
   );
 }
@@ -905,44 +918,44 @@ function heuristicMagnetThemes(magnetType, topic, angles = null) {
   });
 
   const catalogs = {
-    checklist: {
-      pool: CHECKLIST_ANGLE_POOL,
+    diy: {
+      pool: DIY_ANGLE_POOL,
       byId: {
-        before_decide: {
-          title: `Checklist: o que checar antes de ${t}`,
-          description: 'Lista prática para marcar item a item antes de decidir.',
-          pain: 'Decidir sem critério e cair em conversa genérica',
-          promise: 'Checklist acionável + próximo passo com a clínica',
-          conversionReason: 'Quem baixa já chega no WhatsApp com perguntas prontas',
-          adHook: `Baixe o checklist antes de marcar ${t}`,
+        step_by_step: {
+          title: `Passo a passo: como fazer ${t}`,
+          description: 'Tutorial sequencial com instruções claras para cada etapa.',
+          pain: 'Não saber por onde começar e errar na sequência',
+          promise: 'Tutorial prático em PDF + próximo passo com a clínica',
+          conversionReason: 'Quem baixa já chega preparada para conversar',
+          adHook: `Aprenda ${t} passo a passo`,
           scores: scores(4, 4),
         },
-        questions: {
-          title: `Checklist de perguntas para sua avaliação de ${t}`,
-          description: 'Perguntas objetivas para levar na conversa com a especialista.',
-          pain: 'Sair da avaliação sem ter perguntado o essencial',
-          promise: 'Lista de perguntas + confiança na conversa',
-          conversionReason: 'Aumenta qualidade do lead e da avaliação',
-          adHook: `Leve estas perguntas na avaliação de ${t}`,
+        at_home: {
+          title: `Como fazer ${t} em casa (tutorial)`,
+          description: 'Guia para fazer com segurança antes de ir à clínica.',
+          pain: 'Medo de errar tentando sozinha',
+          promise: 'Passo a passo seguro + quando buscar ajuda profissional',
+          conversionReason: 'Educa e aquece o lead para avaliação',
+          adHook: `Tutorial de ${t} para fazer em casa`,
           scores: scores(5, 4),
         },
-        red_flags: {
-          title: `Checklist: sinais de alerta antes de marcar ${t}`,
-          description: 'Itens para evitar escolha errada de clínica/profissional.',
-          pain: 'Medo de cair em conversa agressiva ou pouco clara',
-          promise: 'Checklist de alerta + critério de escolha',
-          conversionReason: 'Posiciona a clínica como transparente',
-          adHook: `Sinais de alerta antes de ${t}`,
-          scores: scores(5, 5),
+        visual_guide: {
+          title: `Tutorial visual de ${t}`,
+          description: 'Sequência visual com dicas em cada passo.',
+          pain: 'Instruções confusas na internet',
+          promise: 'Tutorial organizado + clareza do processo',
+          conversionReason: 'Posiciona a clínica como guia confiável',
+          adHook: `Tutorial visual gratuito de ${t}`,
+          scores: scores(4, 5),
         },
-        prepare: {
-          title: `Checklist rápido: prepare-se para ${t}`,
-          description: 'O que organizar na semana e no dia do procedimento/avaliação.',
-          pain: 'Chegar despreparada e ansiosa',
-          promise: 'Checklist de preparação + tranquilidade',
-          conversionReason: 'Reduz no-show e aquece a conversa',
-          adHook: `Prepare-se para ${t} com este checklist`,
-          scores: scores(4, 4),
+        mistakes: {
+          title: `Tutorial: erros comuns em ${t} e como evitar`,
+          description: 'O que não fazer e o caminho certo em cada etapa.',
+          pain: 'Repetir erros que estragam o resultado',
+          promise: 'Lista de erros + como corrigir cada um',
+          conversionReason: 'Gera confiança e urgência de orientação',
+          adHook: `Evite erros em ${t} — tutorial gratuito`,
+          scores: scores(5, 5),
         },
       },
     },
@@ -1091,8 +1104,8 @@ function rewriteThemeAsMagnet(theme, magnetType, topic, angleHint = null) {
   const t = String(topic || 'estética').trim() || 'estética';
   let title = String(theme?.title || '').trim();
   const ok =
-    magnetType === 'checklist'
-      ? isChecklistThemeOk(theme)
+    magnetType === 'diy'
+      ? isDiyThemeOk(theme)
       : magnetType === 'evaluation'
         ? isEvaluationThemeOk(theme)
         : magnetType === 'ebook'
@@ -1106,10 +1119,10 @@ function rewriteThemeAsMagnet(theme, magnetType, topic, angleHint = null) {
       : `Tema de ${magnetType} sobre ${t}`;
   }
   const defaults = {
-    checklist: {
-      description: 'Checklist prático para marcar item a item e chegar preparada na conversa.',
-      promise: `Checklist de ${t} + próximo passo`,
-      adHook: `Baixe o checklist de ${t}`,
+    diy: {
+      description: 'Tutorial passo a passo para fazer com mais confiança.',
+      promise: `Tutorial de ${t} em PDF`,
+      adHook: `Baixe o tutorial de ${t}`,
     },
     evaluation: {
       description: 'Escolha um horário da fila — a clínica confirma no WhatsApp.',
@@ -1150,8 +1163,8 @@ function rewriteThemeAsMagnet(theme, magnetType, topic, angleHint = null) {
 function filterMagnetThemes(magnetType, themes, topic, angles = null) {
   const list = Array.isArray(themes) ? themes : [];
   const pool =
-    magnetType === 'checklist'
-      ? CHECKLIST_ANGLE_POOL
+    magnetType === 'diy'
+      ? DIY_ANGLE_POOL
       : magnetType === 'evaluation'
         ? EVALUATION_ANGLE_POOL
         : magnetType === 'ebook'
@@ -1159,8 +1172,8 @@ function filterMagnetThemes(magnetType, themes, topic, angles = null) {
           : QUIZ_ANGLE_POOL;
   const angleList = angles && angles.length ? angles : pickAnglesFrom(pool, 4);
   const isOk =
-    magnetType === 'checklist'
-      ? isChecklistThemeOk
+    magnetType === 'diy'
+      ? isDiyThemeOk
       : magnetType === 'evaluation'
         ? isEvaluationThemeOk
         : magnetType === 'ebook'
@@ -1194,16 +1207,23 @@ function filterMagnetThemes(magnetType, themes, topic, angles = null) {
   return merged.slice(0, 5);
 }
 
-function sanitizeChecklistContent(content, topic) {
-  if (!content?.checklist) return content;
-  const base = heuristicMagnetContent('checklist', topic || 'estética');
-  const c = { ...content.checklist };
-  const bad = /laudo|diagn[oó]stico|selfie|calcule|pacote essencial/i;
-  if (bad.test(String(c.title || ''))) c.title = base.checklist.title;
-  if (bad.test(String(c.subtitle || ''))) c.subtitle = base.checklist.subtitle;
-  if (!Array.isArray(c.items) || c.items.length < 4) c.items = base.checklist.items;
-  if (!c.disclaimer) c.disclaimer = base.checklist.disclaimer;
-  return { ...content, checklist: c };
+function sanitizeTutorialContent(content, topic) {
+  const tutorial = resolveTutorialContent(content);
+  if (!tutorial) return content;
+  const base = heuristicMagnetContent('diy', topic || 'estética');
+  const c = { ...tutorial };
+  const bad = /laudo|diagn[oó]stico|selfie|calcule|pacote essencial|checklist/i;
+  if (bad.test(String(c.title || ''))) c.title = base.tutorial.title;
+  if (bad.test(String(c.subtitle || ''))) c.subtitle = base.tutorial.subtitle;
+  if (!Array.isArray(c.steps) || c.steps.length < 4) c.steps = base.tutorial.steps;
+  c.steps = c.steps.map((step) => ({
+    title: step.title || 'Passo',
+    body: step.body || step.tip || 'Siga com calma e revise antes de avançar.',
+    tip: step.tip || undefined,
+    materials: Array.isArray(step.materials) ? step.materials : undefined,
+  }));
+  if (!c.disclaimer) c.disclaimer = base.tutorial.disclaimer;
+  return { ...content, tutorial: c };
 }
 
 function sanitizeEvaluationContent(content, topic) {
@@ -1229,8 +1249,19 @@ function normalizeCouponPercent(value) {
   return rounded;
 }
 
+function enrichCampaignContent(content) {
+  if (!content) return content;
+  if ((content.checklist || content.tutorial) && !content.tutorial?.steps?.length) {
+    const tutorial = resolveTutorialContent(content);
+    if (tutorial) return { ...content, tutorial };
+  }
+  return content;
+}
+
 function formatCampaign(doc) {
   const obj = doc.toObject ? doc.toObject() : doc;
+  const leadMagnetType = normalizeLeadMagnetType(obj.leadMagnetType || 'ebook');
+  const content = enrichCampaignContent(obj.content || null);
   return {
     id: String(obj._id),
     title: obj.title,
@@ -1238,14 +1269,14 @@ function formatCampaign(doc) {
     procedureName: obj.procedureName || '',
     publicSlug: obj.publicSlug,
     status: obj.status,
-    leadMagnetType: obj.leadMagnetType || 'ebook',
+    leadMagnetType,
     diagnosisVariant: normalizeDiagnosisVariant(obj.diagnosisVariant),
     contactWhatsApp: obj.contactWhatsApp || '',
     couponCode: obj.couponCode || '',
     couponPercent: normalizeCouponPercent(obj.couponPercent),
     couponMessage: obj.couponMessage || '',
     selectedTheme: obj.selectedTheme || null,
-    content: obj.content || null,
+    content,
     qualityReport: obj.qualityReport || null,
     source: obj.source || null,
     pdfKey: obj.pdfKey || null,
@@ -1389,6 +1420,144 @@ async function buildClinicBrief(userId) {
 }
 
 /**
+ * Carrega títulos/temas já usados em campanhas da clínica (para deduplicação).
+ */
+async function loadUsedCampaignThemes(userId, { leadMagnetType, excludeCampaignId, limit = 30 } = {}) {
+  const normalized = normalizeLeadMagnetType(leadMagnetType || 'ebook');
+  const typeValues = normalized === 'diy' ? ['diy', 'checklist'] : [normalized];
+  const filter = {
+    userId,
+    status: { $ne: 'archived' },
+    leadMagnetType: { $in: typeValues },
+  };
+  if (excludeCampaignId) {
+    filter._id = { $ne: excludeCampaignId };
+  }
+  const rows = await Campaign.find(filter)
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .select('topic title procedureName selectedTheme leadMagnetType createdAt')
+    .lean();
+
+  return rows.flatMap((r) =>
+    [r.topic, r.title, r.procedureName, r.selectedTheme?.title]
+      .filter(Boolean)
+      .map((label) => ({ label, campaignId: String(r._id) }))
+  );
+}
+
+const CLINIC_BUSINESS_TOPIC_SEEDS = [
+  'Vendas consultivas (para clínicas)',
+  'Captação de clientes (para clínicas)',
+  'Reativação de pacientes (para clínicas)',
+  'Indicação e boca a boca (para clínicas)',
+  'Instagram para clínicas (para clínicas)',
+  'Conversão de leads em avaliações (para clínicas)',
+  'Atendimento no WhatsApp (para clínicas)',
+  'Fidelização de pacientes (para clínicas)',
+];
+
+function heuristicTopicCorrelations(query, procedures = [], leadMagnetType = 'ebook') {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q || q.length < 2) return [];
+
+  const patientFromProcedures = (procedures || [])
+    .filter((p) => String(p.name || '').toLowerCase().includes(q))
+    .slice(0, 3)
+    .map((p) => ({
+      label: p.name,
+      context: 'patient',
+      hint: 'Procedimento do catálogo',
+    }));
+
+  const patientGeneric = [
+    { label: `Como fazer ${query} em casa`, context: 'patient', hint: 'Tutorial DIY' },
+    { label: `Passo a passo de ${query}`, context: 'patient', hint: 'Tutorial prático' },
+    { label: `O que saber antes de ${query}`, context: 'patient', hint: 'Material educativo' },
+  ];
+
+  const clinicMatches = CLINIC_BUSINESS_TOPIC_SEEDS.filter((s) =>
+    s.toLowerCase().includes(q)
+  ).map((label) => ({
+    label,
+    context: 'clinic_business',
+    hint: 'Para o negócio da clínica',
+  }));
+
+  const clinicGeneric = CLINIC_BUSINESS_TOPIC_SEEDS.slice(0, 4).map((label) => ({
+    label,
+    context: 'clinic_business',
+    hint: 'Para o negócio da clínica',
+  }));
+
+  const magnetHint =
+    leadMagnetType === 'diy' ? 'Tutorial passo a passo' : 'Lead magnet educativo';
+
+  return [...patientFromProcedures, ...patientGeneric, ...(clinicMatches.length ? clinicMatches : clinicGeneric)]
+    .map((s) => ({ ...s, hint: s.hint || magnetHint }))
+    .slice(0, 8);
+}
+
+/**
+ * Sugestões correlacionadas enquanto o usuário digita no campo de tema.
+ */
+async function suggestTopicCorrelations(userId, payload = {}) {
+  const query = String(payload.query || '').trim();
+  if (query.length < 2) {
+    return { suggestions: [], source: 'empty' };
+  }
+
+  const { clinicName, procedures } = await buildClinicBrief(userId);
+  const magnetType = normalizeLeadMagnetType(payload.leadMagnetType || 'ebook');
+  const usedEntries = await loadUsedCampaignThemes(userId, {
+    leadMagnetType: magnetType,
+    excludeCampaignId: payload.excludeCampaignId,
+  });
+  const existingThemes = uniqueLabels(usedEntries.map((e) => e.label));
+
+  let suggestions = heuristicTopicCorrelations(query, procedures, magnetType);
+  let source = 'heuristic';
+
+  if (isAgnoEnabled()) {
+    try {
+      const res = await agnoSuggestTopicCorrelations({
+        userId: String(userId),
+        campaignBrief: {
+          query,
+          leadMagnetType: magnetType,
+          procedureName: payload.procedureName || '',
+          existingThemes,
+        },
+        context: { clinicName, procedures },
+      });
+      const agnoSuggestions = res?.data?.suggestions || [];
+      if (agnoSuggestions.length >= 4) {
+        suggestions = agnoSuggestions;
+        source = res?.source || 'agno';
+      }
+    } catch (err) {
+      console.warn('[campaign] topic correlations failed:', err.message);
+    }
+  }
+
+  suggestions = filterDuplicateLabels(
+    suggestions.map((s) => s.label),
+    usedEntries
+  ).map((label) => {
+    const original = suggestions.find((s) => s.label === label);
+    return (
+      original || {
+        label,
+        context: /\(para clínicas\)/i.test(label) ? 'clinic_business' : 'patient',
+        hint: '',
+      }
+    );
+  });
+
+  return { suggestions: suggestions.slice(0, 8), source };
+}
+
+/**
  * Etapa de validação de tema: a IA analisa o contexto da clínica e devolve
  * 3–5 temas com racional e score, antes de qualquer geração de conteúdo.
  */
@@ -1407,13 +1576,19 @@ async function suggestCampaignThemes(userId, payload = {}) {
   }
 
   const magnetType = normalizeLeadMagnetType(payload.leadMagnetType || 'ebook');
+  const usedEntries = await loadUsedCampaignThemes(userId, {
+    leadMagnetType: magnetType,
+    excludeCampaignId: payload.excludeCampaignId,
+  });
+  const existingThemes = uniqueLabels(usedEntries.map((e) => e.label));
+
   const diversityAngles =
     magnetType === 'diagnosis'
       ? pickDiagnosisAngles(4)
       : magnetType === 'calculator'
         ? pickCalculatorAngles(4)
-        : magnetType === 'checklist'
-          ? pickAnglesFrom(CHECKLIST_ANGLE_POOL, 4)
+        : magnetType === 'diy'
+          ? pickAnglesFrom(DIY_ANGLE_POOL, 4)
           : magnetType === 'evaluation'
             ? pickAnglesFrom(EVALUATION_ANGLE_POOL, 4)
             : magnetType === 'ebook'
@@ -1435,6 +1610,8 @@ async function suggestCampaignThemes(userId, payload = {}) {
       hint: a.hint,
       titleHint: a.titleHint,
     })),
+    existingThemes,
+    topicContext: payload.topicContext || null,
   };
   if (magnetType === 'diagnosis') {
     brief.diagnosisVariant = normalizeDiagnosisVariant(payload.diagnosisVariant);
@@ -1532,15 +1709,15 @@ async function suggestCampaignThemes(userId, payload = {}) {
     }
     themes = filterCalculatorThemes(themes, topicKey, diversityAngles);
   } else if (
-    brief.leadMagnetType === 'checklist' ||
+    brief.leadMagnetType === 'diy' ||
     brief.leadMagnetType === 'evaluation' ||
     brief.leadMagnetType === 'ebook' ||
     brief.leadMagnetType === 'quiz'
   ) {
     const type = brief.leadMagnetType;
     const okFn =
-      type === 'checklist'
-        ? isChecklistThemeOk
+      type === 'diy'
+        ? isDiyThemeOk
         : type === 'evaluation'
           ? isEvaluationThemeOk
           : type === 'ebook'
@@ -1570,6 +1747,34 @@ async function suggestCampaignThemes(userId, payload = {}) {
       }
     }
     themes = filterMagnetThemes(type, themes, topicKey, diversityAngles);
+  }
+
+  themes = filterDuplicateThemes(themes, usedEntries);
+  if (themes.length < 3 && existingThemes.length) {
+    try {
+      const retryBrief = {
+        ...brief,
+        retryHint:
+          'TEMAS REJEITADOS (já usados pela clínica ou muito parecidos). Gere 4 temas NOVOS com ângulos DIFERENTES:\n' +
+          existingThemes.slice(0, 15).map((t, i) => `${i + 1}) ${t}`).join('\n'),
+      };
+      const retry = await agnoSuggestThemes({
+        userId: String(userId),
+        campaignBrief: retryBrief,
+        context: { clinicName, procedures },
+      });
+      const retryThemes = filterDuplicateThemes(retry?.data?.themes || [], usedEntries);
+      if (retryThemes.length >= 3) themes = retryThemes;
+      else {
+        const heuristics = filterMagnetThemes(magnetType, retryThemes, topicKey, diversityAngles);
+        for (const th of heuristics) {
+          if (themes.length >= 5) break;
+          if (!themes.some((t) => titlesTooSimilar(t.title, th.title))) themes.push(th);
+        }
+      }
+    } catch (retryErr) {
+      console.warn('[campaign] theme dedup retry failed:', retryErr.message);
+    }
   }
 
   // Garante badge/tipo consistente na UI
@@ -1833,10 +2038,13 @@ function buildQualityReport(content, leadMagnetType) {
     }
   }
 
-  if (leadMagnetType === 'checklist') {
-    const items = content?.checklist?.items || [];
-    report.itemCount = items.length;
-    if (items.length < 5) warnings.push(`Checklist com poucos itens: ${items.length}`);
+  if (leadMagnetType === 'diy') {
+    const tutorial = resolveTutorialContent(content);
+    const steps = tutorial?.steps || [];
+    report.stepCount = steps.length;
+    if (steps.length < 4) warnings.push(`Tutorial com poucos passos: ${steps.length}`);
+    const emptyBodies = steps.filter((s) => !String(s.body || '').trim()).length;
+    if (emptyBodies) warnings.push(`${emptyBodies} passo(s) sem instruções detalhadas`);
   }
 
   if (leadMagnetType === 'calculator') {
@@ -1963,8 +2171,11 @@ async function generateCampaignContent(userId, id) {
       campaignBrief: brief,
       context: { clinicName, procedures: focusProcedures },
     });
-    content = res?.data || null;
+    content = normalizeMagnetContentFromAgno(res?.data || null, leadMagnetType);
     source = res?.source || 'agno';
+    if (res?.success === false && contentIsComplete(leadMagnetType, content)) {
+      source = 'agno';
+    }
   } catch (err) {
     console.warn('[campaign] agno failed:', err.message);
     if (isLegacyStrict) {
@@ -2044,8 +2255,11 @@ async function generateCampaignContent(userId, id) {
   if (leadMagnetType === 'calculator') {
     content = sanitizeCalculatorContent(content, brief.topic, focusProcedures);
   }
-  if (leadMagnetType === 'checklist') {
-    content = sanitizeChecklistContent(content, brief.topic);
+  if (leadMagnetType === 'diy') {
+    if (content?.checklist && !content?.tutorial?.steps?.length) {
+      content.tutorial = migrateChecklistToTutorial(content.checklist);
+    }
+    content = sanitizeTutorialContent(content, brief.topic);
   }
   if (leadMagnetType === 'evaluation') {
     content = sanitizeEvaluationContent(content, brief.topic);
@@ -2064,7 +2278,7 @@ async function generateCampaignContent(userId, id) {
   const generatedTitle =
     content.quiz?.title ||
     content.ebook?.title ||
-    content.checklist?.title ||
+    resolveTutorialContent(content)?.title ||
     content.calculator?.title ||
     content.evaluation?.title;
   if (generatedTitle) {
@@ -2077,9 +2291,10 @@ async function generateCampaignContent(userId, id) {
 
   if (needsPdf(leadMagnetType)) {
     try {
+      const tutorial = resolveTutorialContent(content);
       const ebookShape =
-        leadMagnetType === 'checklist'
-          ? checklistToEbookPdfShape(content.checklist)
+        leadMagnetType === 'diy' && tutorial
+          ? tutorialToEbookPdfShape(tutorial)
           : content.ebook;
       if (ebookShape?.sections?.length) {
         const pdfBuffer = await buildEbookPdfBuffer(ebookShape, { clinicName });
@@ -2191,6 +2406,7 @@ async function getPublicCampaign(slug) {
   const ebook = campaign.content?.ebook || {};
   const quiz = campaign.content?.quiz || null;
   const checklist = campaign.content?.checklist || null;
+  const tutorial = resolveTutorialContent(campaign.content);
   let calculator = campaign.content?.calculator || null;
   const evaluation = campaign.content?.evaluation || null;
   const leadMagnetType = normalizeLeadMagnetType(campaign.leadMagnetType);
@@ -2219,7 +2435,7 @@ async function getPublicCampaign(slug) {
   const showCoupon = Boolean(String(campaign.couponCode || '').trim()) && (
     leadMagnetType === 'calculator' ||
     (leadMagnetType === 'diagnosis' && diagnosisVariant !== 'simulation') ||
-    leadMagnetType === 'checklist' ||
+    leadMagnetType === 'diy' ||
     leadMagnetType === 'ebook' ||
     leadMagnetType === 'quiz' ||
     leadMagnetType === 'evaluation'
@@ -2246,18 +2462,20 @@ async function getPublicCampaign(slug) {
         landing.learnItems?.length
           ? landing.learnItems
           : (ebook.sections || []).map((s) => s.heading).filter(Boolean)
-            .concat((checklist?.items || []).map((i) => i.text).filter(Boolean)),
+              .concat((tutorial?.steps || []).map((s) => s.title).filter(Boolean))
+              .concat((checklist?.items || []).map((i) => i.text).filter(Boolean)),
       benefits: landing.benefits?.length ? landing.benefits : landing.bullets || [],
       formTitle: landing.formTitle || evaluation?.formTitle || 'Receba o material agora',
       ctaText: landing.ctaText || landing.cta || evaluation?.ctaText || 'Baixar grátis',
     },
     ebook: {
-      title: ebook.title || checklist?.title || campaign.title,
-      subtitle: ebook.subtitle || checklist?.subtitle || '',
+      title: ebook.title || tutorial?.title || checklist?.title || campaign.title,
+      subtitle: ebook.subtitle || tutorial?.subtitle || checklist?.subtitle || '',
       coverTagline: ebook.coverTagline || '',
     },
     quiz: isFunnelMagnet(leadMagnetType) ? quizOut : undefined,
-    checklist: leadMagnetType === 'checklist' ? checklist : undefined,
+    tutorial: leadMagnetType === 'diy' ? tutorial : undefined,
+    checklist: undefined,
     calculator: leadMagnetType === 'calculator' ? calculator : undefined,
     evaluation: leadMagnetType === 'evaluation' ? evaluation : undefined,
   };
@@ -2690,6 +2908,7 @@ module.exports = {
   getCampaignStats,
   createCampaign,
   suggestCampaignThemes,
+  suggestTopicCorrelations,
   generateCampaignContent,
   updateCampaign,
   publishCampaign,
@@ -2702,4 +2921,7 @@ module.exports = {
   // exportado para testes
   normalizeAdCreatives,
   buildQualityReport,
+  loadUsedCampaignThemes,
+  themesAreSimilar: require('./campaignThemeDedup').themesAreSimilar,
+  filterDuplicateThemes,
 };

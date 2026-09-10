@@ -9,7 +9,8 @@ const FUNNEL_DELAY_MS_MAX = 180_000;
 const TYPE_LABELS = {
   ebook: 'ebook',
   quiz: 'quiz',
-  checklist: 'checklist',
+  checklist: 'tutorial',
+  diy: 'tutorial',
   diagnosis: 'diagnóstico',
   calculator: 'calculadora',
   evaluation: 'avaliação',
@@ -18,6 +19,7 @@ const TYPE_LABELS = {
 
 function resolveFunnelType(rawType) {
   const t = String(rawType || 'form').toLowerCase().trim();
+  if (t === 'checklist') return 'diy';
   if (WhatsAppSettings.FUNNEL_TEMPLATE_KEYS.includes(t)) return t;
   if (t === 'custom' || t === 'nps' || t === 'nao_fechamento' || t === 'pos_procedimento') {
     return 'form';
