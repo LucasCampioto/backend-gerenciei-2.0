@@ -82,6 +82,16 @@ const saleSchema = new mongoose.Schema({
     default: 0,
     min: 0
   },
+  couponId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Coupon',
+    default: null,
+  },
+  couponCode: {
+    type: String,
+    trim: true,
+    default: '',
+  },
   employeeId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Employee'

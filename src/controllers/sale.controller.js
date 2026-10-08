@@ -1,4 +1,5 @@
 const Sale = require('../models/Sale');
+const Coupon = require('../models/Coupon');
 const Employee = require('../models/Employee');
 const Client = require('../models/Client');
 const mongoose = require('mongoose');
@@ -50,6 +51,8 @@ function formatSale(sale, creatorNameById = null) {
     cardBrandGroup: obj.cardBrandGroup ?? 'default',
     installments: obj.installments ?? 1,
     discount: obj.discount || 0,
+    couponId: obj.couponId ? String(obj.couponId) : null,
+    couponCode: obj.couponCode || '',
     employeeId: obj.employeeId ? obj.employeeId.toString() : obj.employeeId,
     employeeName: obj.employeeName,
     clientId: obj.clientId ? obj.clientId.toString() : obj.clientId,
@@ -291,6 +294,7 @@ async function createSale(req, res, next) {
       commissionValue,
       paymentMethod,
       discount,
+      couponId,
       employeeId,
       employeeName,
       clientId,
@@ -315,6 +319,21 @@ async function createSale(req, res, next) {
         ? cardBrandGroup || 'visa_master'
         : 'default';
 
+    let linkedCoupon = null;
+    if (couponId) {
+      if (!mongoose.Types.ObjectId.isValid(couponId)) {
+        return res.status(400).json({ success: false, error: 'Cupom inválido' });
+      }
+      linkedCoupon = await Coupon.findOne({
+        _id: couponId,
+        userId: scopeUserId(req),
+        active: true,
+      });
+      if (!linkedCoupon) {
+        return res.status(400).json({ success: false, error: 'Cupom não encontrado' });
+      }
+    }
+
     const sale = new Sale({
       ...tenantCreateFields(req),
       items,
@@ -327,6 +346,8 @@ async function createSale(req, res, next) {
       cardBrandGroup: resolvedBrandGroup,
       installments: installmentCount,
       discount: discount || 0,
+      couponId: linkedCoupon ? linkedCoupon._id : null,
+      couponCode: linkedCoupon ? linkedCoupon.code : '',
       employeeId: employeeId || undefined,
       employeeName: employeeName || undefined,
       clientId: clientId || undefined,
@@ -348,7 +369,9 @@ async function createSale(req, res, next) {
         if (!sale.clientPhone) sale.clientPhone = linkedClient.phone;
         await sale.save();
       }
+    }
 
+    if (linkedClient) {
       const recommendationId = req.body.recommendationId || '';
       await logActivity({
         ...tenantCreateFields(req),

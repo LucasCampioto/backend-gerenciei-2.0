@@ -23,6 +23,7 @@ function requiredFeatureForPath(p) {
   if (p.startsWith('/api/enhance-pairs') || p.startsWith('/api/enhance')) return 'ai_simulation';
   if (p.startsWith('/api/simulations')) return 'ai_simulation';
   if (p.startsWith('/api/whatsapp')) return 'whatsapp';
+  if (p.startsWith('/api/coupons')) return 'marketing';
   if (p.startsWith('/api/campaigns')) return 'marketing';
   if (p.startsWith('/api/marketing')) return 'marketing';
   if (p.startsWith('/api/crm')) return 'crm';

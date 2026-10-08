@@ -1,16 +1,37 @@
 const Form = require('../models/Form');
+const Coupon = require('../models/Coupon');
 const FormResponse = require('../models/FormResponse');
 const Client = require('../models/Client');
 const { findClientByPhone, isValidBrazilianPhone, stripPhoneDigits } = require('../utils/phoneMatch');
 const { findClientByNormalizedName } = require('../utils/nameMatch');
+const { couponQrDestination } = require('../services/coupon.service');
 const { logActivity } = require('../services/clientActivity.service');
+const { recordCaptureTouchpoint } = require('../services/platformAttribution.service');
 const { isOtherAnswer, isChoiceAnswerEmpty } = require('../utils/choiceAnswer');
 
-function formatPublicForm(form) {
+async function formatPublicForm(form) {
   const obj = form.toObject ? form.toObject() : form;
+  let code = String(obj.couponCode || '').trim();
+  let percent = Number(obj.couponPercent);
+  let enabled = obj.couponEnabled === true;
+  let couponQrTarget = null;
+  if (obj.couponId) {
+    const coupon = await Coupon.findById(obj.couponId).lean();
+    if (!coupon || coupon.active === false) {
+      enabled = false;
+    } else {
+      code = String(coupon.code || '').trim();
+      percent = Number(coupon.percent);
+      if (enabled) couponQrTarget = await couponQrDestination(coupon);
+    }
+  }
+  const couponActive = enabled && code && percent >= 1 && percent <= 100;
   return {
     title: obj.title,
     description: obj.description || '',
+    couponCode: couponActive ? code : '',
+    couponPercent: couponActive ? Math.round(percent) : null,
+    couponQrTarget: couponActive ? couponQrTarget : null,
     questions: obj.questions || [],
   };
 }
@@ -104,7 +125,7 @@ async function getPublicForm(req, res, next) {
 
     res.json({
       success: true,
-      data: formatPublicForm(form),
+      data: await formatPublicForm(form),
     });
   } catch (error) {
     next(error);
@@ -224,6 +245,17 @@ async function submitPublicResponse(req, res, next) {
       type: 'form_response',
       content: `Respondeu formulário: ${form.title}`,
     });
+
+    try {
+      await recordCaptureTouchpoint(form.userId, { organizationId: client.organizationId || null }, {
+        feature: 'form',
+        clientId: client._id,
+        formId: form._id,
+        meta: { formTitle: form.title },
+      });
+    } catch {
+      /* ignore duplicate touchpoint */
+    }
 
     // Qualificação comercial em background (não bloqueia resposta ao paciente).
     // Sincroniza regras da fila sem re-rodar ranking Agno se o cache do dia já existir.

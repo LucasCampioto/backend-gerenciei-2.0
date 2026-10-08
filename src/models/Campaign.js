@@ -87,6 +87,11 @@ const campaignSchema = new mongoose.Schema(
       enum: ['laudo', 'simulation'],
       default: 'laudo',
     },
+    couponId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Coupon',
+      default: null,
+    },
     /** Cupom de incentivo no resultado (somente variante laudo / sem simulação). */
     couponCode: {
       type: String,

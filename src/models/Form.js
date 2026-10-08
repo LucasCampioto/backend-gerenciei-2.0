@@ -80,6 +80,27 @@ const formSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  couponId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Coupon',
+    default: null,
+  },
+  /** Cupom revelado com animação no fim do formulário público. */
+  couponEnabled: {
+    type: Boolean,
+    default: false,
+  },
+  couponCode: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+  couponPercent: {
+    type: Number,
+    default: null,
+    min: 1,
+    max: 100,
+  },
   questions: {
     type: [questionSchema],
     default: [],

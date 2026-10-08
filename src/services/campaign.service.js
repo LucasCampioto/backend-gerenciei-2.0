@@ -1,5 +1,7 @@
 const crypto = require('crypto');
 const Campaign = require('../models/Campaign');
+const Coupon = require('../models/Coupon');
+const { resolveCouponSelection } = require('./coupon.service');
 const CampaignLead = require('../models/CampaignLead');
 const Client = require('../models/Client');
 const User = require('../models/User');
@@ -40,6 +42,7 @@ const {
 const { findClientByPhone, isValidBrazilianPhone, stripPhoneDigits } = require('../utils/phoneMatch');
 const { findClientByNormalizedName } = require('../utils/nameMatch');
 const { logActivity } = require('./clientActivity.service');
+const { recordCaptureTouchpoint } = require('./platformAttribution.service');
 const {
   normalizeDiagnosisVariant,
   createUploadToken,
@@ -1272,6 +1275,7 @@ function formatCampaign(doc) {
     leadMagnetType,
     diagnosisVariant: normalizeDiagnosisVariant(obj.diagnosisVariant),
     contactWhatsApp: obj.contactWhatsApp || '',
+    couponId: obj.couponId ? String(obj.couponId) : null,
     couponCode: obj.couponCode || '',
     couponPercent: normalizeCouponPercent(obj.couponPercent),
     couponMessage: obj.couponMessage || '',
@@ -1966,6 +1970,21 @@ async function createCampaign(userId, payload = {}) {
 
   const owner = await User.findById(userId).select('phone').lean();
 
+  let couponFields = {
+    couponId: null,
+    couponCode:
+      diagnosisVariant === 'simulation'
+        ? ''
+        : String(payload.couponCode || '').trim().slice(0, 40),
+    couponPercent:
+      diagnosisVariant === 'simulation'
+        ? null
+        : normalizeCouponPercent(payload.couponPercent),
+  };
+  if (payload.couponId && diagnosisVariant !== 'simulation') {
+    couponFields = await resolveCouponSelection(userId, payload.couponId);
+  }
+
   const campaign = await Campaign.create({
     userId,
     title,
@@ -1977,14 +1996,9 @@ async function createCampaign(userId, payload = {}) {
     leadMagnetType,
     diagnosisVariant,
     contactWhatsApp: payload.contactWhatsApp || owner?.phone || '',
-    couponCode:
-      diagnosisVariant === 'simulation'
-        ? ''
-        : String(payload.couponCode || '').trim().slice(0, 40),
-    couponPercent:
-      diagnosisVariant === 'simulation'
-        ? null
-        : normalizeCouponPercent(payload.couponPercent),
+    couponId: couponFields.couponId,
+    couponCode: couponFields.couponCode,
+    couponPercent: couponFields.couponPercent,
     couponMessage:
       diagnosisVariant === 'simulation'
         ? ''
@@ -2328,11 +2342,23 @@ async function updateCampaign(userId, id, payload = {}) {
   if (payload.diagnosisVariant !== undefined) {
     campaign.diagnosisVariant = normalizeDiagnosisVariant(payload.diagnosisVariant);
   }
-  if (payload.couponCode !== undefined) {
+  if (payload.couponId !== undefined) {
+    if (normalizeDiagnosisVariant(campaign.diagnosisVariant) === 'simulation' || !payload.couponId) {
+      campaign.couponId = null;
+      campaign.couponCode = '';
+      campaign.couponPercent = null;
+    } else {
+      const selected = await resolveCouponSelection(userId, payload.couponId);
+      campaign.couponId = selected.couponId;
+      campaign.couponCode = selected.couponCode;
+      campaign.couponPercent = selected.couponPercent;
+    }
+  } else if (payload.couponCode !== undefined) {
     campaign.couponCode =
       normalizeDiagnosisVariant(campaign.diagnosisVariant) === 'simulation'
         ? ''
         : String(payload.couponCode || '').trim().slice(0, 40);
+    if (!String(payload.couponCode || '').trim()) campaign.couponId = null;
   }
   if (payload.couponPercent !== undefined) {
     campaign.couponPercent =
@@ -2432,7 +2458,20 @@ async function getPublicCampaign(slug) {
     }
   }
 
-  const showCoupon = Boolean(String(campaign.couponCode || '').trim()) && (
+  let publicCouponCode = campaign.couponCode;
+  let publicCouponPercent = campaign.couponPercent;
+  if (campaign.couponId) {
+    const linked = await Coupon.findById(campaign.couponId).select('code percent active').lean();
+    if (!linked || linked.active === false) {
+      publicCouponCode = '';
+      publicCouponPercent = null;
+    } else {
+      publicCouponCode = linked.code;
+      publicCouponPercent = linked.percent;
+    }
+  }
+
+  const showCoupon = Boolean(String(publicCouponCode || '').trim()) && (
     leadMagnetType === 'calculator' ||
     (leadMagnetType === 'diagnosis' && diagnosisVariant !== 'simulation') ||
     leadMagnetType === 'diy' ||
@@ -2447,8 +2486,8 @@ async function getPublicCampaign(slug) {
     leadMagnetType,
     diagnosisVariant,
     contactWhatsApp,
-    couponCode: showCoupon ? String(campaign.couponCode).trim() : undefined,
-    couponPercent: showCoupon ? normalizeCouponPercent(campaign.couponPercent) : undefined,
+    couponCode: showCoupon ? String(publicCouponCode).trim() : undefined,
+    couponPercent: showCoupon ? normalizeCouponPercent(publicCouponPercent) : undefined,
     couponMessage: showCoupon
       ? String(campaign.couponMessage || '').trim() || undefined
       : undefined,
@@ -2799,6 +2838,20 @@ async function submitPublicCampaignLead(slug, {
     type: 'form_response',
     content: activityContent,
   });
+
+  if (campaignLeadId) {
+    try {
+      await recordCaptureTouchpoint(campaign.userId, { organizationId: client.organizationId || null }, {
+        feature: 'campaign',
+        clientId: client._id,
+        campaignId: campaign._id,
+        campaignLeadId,
+        meta: { campaignTitle: campaign.title, leadMagnetType },
+      });
+    } catch {
+      /* ignore duplicate touchpoint */
+    }
+  }
 
   campaign.leadsCount = (campaign.leadsCount || 0) + 1;
   await campaign.save();

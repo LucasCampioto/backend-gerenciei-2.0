@@ -31,6 +31,37 @@ const formSchema = Joi.object({
   status: Joi.string().valid('active', 'inactive').default('active'),
   templateKey: Joi.string().valid('nps', 'nao_fechamento', 'pos_procedimento', 'custom').default('custom'),
   allowMultipleResponses: Joi.boolean().default(false),
+  couponId: Joi.string().trim().allow('', null).default(null),
+  couponEnabled: Joi.boolean().default(false),
+  couponCode: Joi.when('couponEnabled', {
+    is: true,
+    then: Joi.string().trim().min(1).max(40).required().messages({
+      'string.empty': 'Informe o código de desconto',
+      'string.min': 'Informe o código de desconto',
+      'any.required': 'Informe o código de desconto',
+    }),
+    otherwise: Joi.string().trim().max(40).allow('').default(''),
+  }),
+  couponPercent: Joi.when('couponEnabled', {
+    is: true,
+    then: Joi.number().integer().min(1).max(100).required().messages({
+      'any.required': 'Informe um percentual de desconto entre 1 e 100',
+      'number.base': 'Informe um percentual de desconto entre 1 e 100',
+      'number.min': 'Informe um percentual de desconto entre 1 e 100',
+      'number.max': 'Informe um percentual de desconto entre 1 e 100',
+    }),
+    otherwise: Joi.number().integer().min(1).max(100).allow(null).default(null),
+  }),
+  couponPage: Joi.object({
+    publicEnabled: Joi.boolean(),
+    title: Joi.string().trim().max(80).allow(''),
+    qrEnabled: Joi.boolean(),
+    qrAction: Joi.string().valid('page', 'whatsapp', 'url', 'form'),
+    whatsAppPhone: Joi.string().trim().max(20).allow(''),
+    whatsAppMessage: Joi.string().trim().max(400).allow(''),
+    actionUrl: Joi.string().trim().max(500).allow(''),
+    actionFormId: Joi.string().trim().allow('', null),
+  }).optional(),
   questions: Joi.array().items(questionSchema).min(1).required().messages({
     'array.min': 'Adicione pelo menos uma pergunta',
     'any.required': 'Perguntas são obrigatórias',

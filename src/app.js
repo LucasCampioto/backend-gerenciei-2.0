@@ -122,6 +122,8 @@ app.use('/api/payment-fees', paymentFeeRoutes);
 app.use('/api/crm', crmRoutes);
 app.use('/api/forms', formRoutes);
 app.use('/api/public/forms', publicFormRoutes);
+app.use('/api/coupons', require('./routes/coupon.routes'));
+app.use('/api/public/coupons', require('./routes/publicCoupon.routes'));
 app.use('/api/campaigns', require('./routes/campaign.routes'));
 app.use('/api/public/campaigns', require('./routes/publicCampaign.routes'));
 app.use('/api/marketing', require('./routes/marketing.routes'));

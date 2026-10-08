@@ -1,11 +1,36 @@
 const crypto = require('crypto');
 const Form = require('../models/Form');
+const { resolveCouponSelection, applyCouponPageSettings } = require('../services/coupon.service');
 const FormResponse = require('../models/FormResponse');
 const mongoose = require('mongoose');
 const { tenantFilter, tenantDocFilter, tenantCreateFields } = require('../utils/tenantScope');
 
 function generatePublicSlug() {
   return crypto.randomBytes(9).toString('base64url').slice(0, 12);
+}
+
+async function couponFields(req, body) {
+  if (body.couponEnabled !== true) {
+    return { couponEnabled: false, couponId: null, couponCode: '', couponPercent: null };
+  }
+  if (body.couponId) {
+    const selected = await resolveCouponSelection(req.orgOwnerUserId || req.userId, body.couponId);
+    if (body.couponPage) {
+      await applyCouponPageSettings(req, selected.couponId, body.couponPage);
+    }
+    return {
+      couponEnabled: true,
+      couponId: selected.couponId,
+      couponCode: selected.couponCode,
+      couponPercent: selected.couponPercent,
+    };
+  }
+  return {
+    couponEnabled: true,
+    couponId: null,
+    couponCode: String(body.couponCode || '').trim().toUpperCase(),
+    couponPercent: Math.round(Number(body.couponPercent)),
+  };
 }
 
 function formatForm(form, responseCount = 0) {
@@ -18,6 +43,11 @@ function formatForm(form, responseCount = 0) {
     status: obj.status,
     templateKey: obj.templateKey || 'custom',
     allowMultipleResponses: obj.allowMultipleResponses === true,
+    couponEnabled: obj.couponEnabled === true,
+    couponId: obj.couponId ? String(obj.couponId) : null,
+    couponCode: obj.couponCode || '',
+    couponPercent:
+      obj.couponEnabled === true && obj.couponPercent != null ? obj.couponPercent : null,
     questions: obj.questions || [],
     responseCount,
     createdAt: obj.createdAt instanceof Date ? obj.createdAt.toISOString() : obj.createdAt,
@@ -81,6 +111,7 @@ async function getFormById(req, res, next) {
 async function createForm(req, res, next) {
   try {
     const { title, description, status, templateKey, questions, allowMultipleResponses } = req.body;
+    const coupon = await couponFields(req, req.body);
 
     let publicSlug = generatePublicSlug();
     let attempts = 0;
@@ -98,6 +129,7 @@ async function createForm(req, res, next) {
       status: status || 'active',
       templateKey: templateKey || 'custom',
       allowMultipleResponses: allowMultipleResponses === true,
+      ...coupon,
       questions,
       publicSlug,
     });
@@ -118,6 +150,7 @@ async function updateForm(req, res, next) {
   try {
     const { id } = req.params;
     const { title, description, status, templateKey, questions, allowMultipleResponses } = req.body;
+    const coupon = await couponFields(req, req.body);
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, error: 'ID inválido' });
@@ -131,6 +164,7 @@ async function updateForm(req, res, next) {
         status: status || 'active',
         templateKey: templateKey || 'custom',
         allowMultipleResponses: allowMultipleResponses === true,
+        ...coupon,
         questions,
       },
       { new: true, runValidators: true }
