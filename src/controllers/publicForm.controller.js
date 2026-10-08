@@ -6,7 +6,6 @@ const { findClientByPhone, isValidBrazilianPhone, stripPhoneDigits } = require('
 const { findClientByNormalizedName } = require('../utils/nameMatch');
 const { couponQrDestination } = require('../services/coupon.service');
 const { logActivity } = require('../services/clientActivity.service');
-const { recordCaptureTouchpoint } = require('../services/platformAttribution.service');
 const { isOtherAnswer, isChoiceAnswerEmpty } = require('../utils/choiceAnswer');
 
 async function formatPublicForm(form) {
@@ -245,17 +244,6 @@ async function submitPublicResponse(req, res, next) {
       type: 'form_response',
       content: `Respondeu formulário: ${form.title}`,
     });
-
-    try {
-      await recordCaptureTouchpoint(form.userId, { organizationId: client.organizationId || null }, {
-        feature: 'form',
-        clientId: client._id,
-        formId: form._id,
-        meta: { formTitle: form.title },
-      });
-    } catch {
-      /* ignore duplicate touchpoint */
-    }
 
     // Qualificação comercial em background (não bloqueia resposta ao paciente).
     // Sincroniza regras da fila sem re-rodar ranking Agno se o cache do dia já existir.

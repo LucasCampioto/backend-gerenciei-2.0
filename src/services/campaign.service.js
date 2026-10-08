@@ -42,7 +42,6 @@ const {
 const { findClientByPhone, isValidBrazilianPhone, stripPhoneDigits } = require('../utils/phoneMatch');
 const { findClientByNormalizedName } = require('../utils/nameMatch');
 const { logActivity } = require('./clientActivity.service');
-const { recordCaptureTouchpoint } = require('./platformAttribution.service');
 const {
   normalizeDiagnosisVariant,
   createUploadToken,
@@ -2838,20 +2837,6 @@ async function submitPublicCampaignLead(slug, {
     type: 'form_response',
     content: activityContent,
   });
-
-  if (campaignLeadId) {
-    try {
-      await recordCaptureTouchpoint(campaign.userId, { organizationId: client.organizationId || null }, {
-        feature: 'campaign',
-        clientId: client._id,
-        campaignId: campaign._id,
-        campaignLeadId,
-        meta: { campaignTitle: campaign.title, leadMagnetType },
-      });
-    } catch {
-      /* ignore duplicate touchpoint */
-    }
-  }
 
   campaign.leadsCount = (campaign.leadsCount || 0) + 1;
   await campaign.save();
