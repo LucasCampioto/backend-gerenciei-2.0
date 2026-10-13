@@ -1,12 +1,15 @@
 const Form = require('../models/Form');
 const FormResponse = require('../models/FormResponse');
 const Client = require('../models/Client');
+const Sale = require('../models/Sale');
+const Procedure = require('../models/Procedure');
 const mongoose = require('mongoose');
 const { formatChoiceDisplayValue, normalizeChoiceForAnalytics } = require('../utils/choiceAnswer');
 const { findClientByPhone, stripPhoneDigits } = require('../utils/phoneMatch');
 const { findClientByNormalizedName } = require('../utils/nameMatch');
 const { logActivity } = require('../services/clientActivity.service');
-const { tenantFilter, tenantDocFilter, tenantCreateFields, scopeUserId } = require('../utils/tenantScope');
+const { tenantFilter, tenantDocFilter, tenantCreateFields, scopeUserId, andFilters } = require('../utils/tenantScope');
+const { percentileSorted } = require('../utils/winningMonthsFacts');
 
 function parseDateRange(startDate, endDate) {
   const filter = {};
@@ -37,11 +40,135 @@ function pickRespondentDisplayName(client, respondentName) {
   return fromResponse || fromClient || '—';
 }
 
-function formatResponseRow(response, clientMap, questionMap) {
+function countAudience(clientIds, clientMap) {
+  let clientCount = 0;
+  let leadCount = 0;
+  for (const id of clientIds) {
+    if (clientMap.get(id)?.category === 'cliente') clientCount += 1;
+    else leadCount += 1;
+  }
+  return { clientCount, leadCount };
+}
+
+async function loadClientProcedureHistory(req, clientIds) {
+  const objectIds = clientIds
+    .filter((id) => mongoose.Types.ObjectId.isValid(id))
+    .map((id) => new mongoose.Types.ObjectId(id));
+  if (!objectIds.length) return new Map();
+
+  const sales = await Sale.find(andFilters(tenantFilter(req), {
+    clientId: { $in: objectIds },
+    isDemo: { $ne: true },
+  }))
+    .select('clientId createdAt items.procedureName')
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const history = new Map();
+  for (const sale of sales) {
+    const id = String(sale.clientId);
+    if (!history.has(id)) {
+      history.set(id, { procedures: [], lastVisitAt: sale.createdAt || null });
+    }
+    const entry = history.get(id);
+    const date = sale.createdAt instanceof Date
+      ? sale.createdAt.toISOString()
+      : (sale.createdAt || null);
+    for (const item of sale.items || []) {
+      const name = String(item.procedureName || '').trim();
+      if (name) entry.procedures.push({ name, date });
+    }
+  }
+  return history;
+}
+
+function normalizeProcedureKey(name) {
+  return String(name || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+async function loadProcedurePriceIndex(req) {
+  const procedures = await Procedure.find(tenantFilter(req)).select('name value').lean();
+  const byName = new Map();
+  const values = [];
+  for (const proc of procedures) {
+    const value = Number(proc.value);
+    if (!Number.isFinite(value)) continue;
+    const key = normalizeProcedureKey(proc.name);
+    if (key) byName.set(key, value);
+    if (value > 0) values.push(value);
+  }
+  values.sort((a, b) => a - b);
+  return {
+    byName,
+    lowMax: percentileSorted(values, 33),
+    highMin: percentileSorted(values, 66),
+  };
+}
+
+function procedureTicketBand(value, lowMax, highMin) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  if (amount <= lowMax) return 'low';
+  if (amount > highMin) return 'high';
+  return 'mid';
+}
+
+function buildTicketGroups(clientIds, clientMap, historyMap, priceIndex) {
+  const groups = { low: new Map(), high: new Map() };
+
+  for (const id of clientIds) {
+    const client = clientMap.get(id);
+    if (client?.category !== 'cliente') continue;
+    const procedures = historyMap.get(id)?.procedures || [];
+    for (const proc of procedures) {
+      const value = priceIndex.byName.get(normalizeProcedureKey(proc.name));
+      const band = procedureTicketBand(value, priceIndex.lowMax, priceIndex.highMin);
+      if (band !== 'low' && band !== 'high') continue;
+      if (!groups[band].has(id)) {
+        groups[band].set(id, {
+          clientId: id,
+          clientName: client.name || 'Cliente',
+          clientPhone: client.phone || '',
+          procedures: [],
+        });
+      }
+      const entry = groups[band].get(id);
+      const date = proc.date || null;
+      const duplicate = entry.procedures.some((item) => item.name === proc.name && item.date === date);
+      if (!duplicate) {
+        entry.procedures.push({
+          name: proc.name,
+          date,
+          value,
+        });
+      }
+    }
+  }
+
+  const toList = (map) => [...map.values()].sort((a, b) =>
+    a.clientName.localeCompare(b.clientName, 'pt-BR')
+  );
+
+  return {
+    lowMax: priceIndex.lowMax,
+    highMin: priceIndex.highMin,
+    lowTicketClients: toList(groups.low),
+    highTicketClients: toList(groups.high),
+  };
+}
+
+function formatResponseRow(response, clientMap, questionMap, historyMap = new Map()) {
   const obj = response.toObject ? response.toObject() : response;
   const clientId = obj.clientId ? obj.clientId.toString() : '';
   const client = clientId ? clientMap.get(clientId) : null;
   const respondentName = String(obj.respondentName || '').trim();
+  const isClient = client?.category === 'cliente';
+  const history = isClient ? historyMap.get(clientId) : null;
+  const lastVisit = history?.lastVisitAt || null;
 
   const formattedAnswers = (obj.answers || []).map((answer) => {
     const question = questionMap.get(answer.questionId);
@@ -66,6 +193,10 @@ function formatResponseRow(response, clientMap, questionMap) {
     submittedAt: obj.submittedAt instanceof Date
       ? obj.submittedAt.toISOString()
       : obj.submittedAt,
+    procedures: isClient ? (history?.procedures || []) : [],
+    lastVisitAt: isClient && lastVisit
+      ? (lastVisit instanceof Date ? lastVisit.toISOString() : lastVisit)
+      : null,
     answers: formattedAnswers,
   };
 }
@@ -221,11 +352,15 @@ async function getFormResponses(req, res, next) {
     }).select('name phone category');
     const clientMap = new Map(clients.map((c) => [c._id.toString(), c]));
     const questionMap = new Map(form.questions.map((q) => [q.id, q]));
+    const clientCategoryIds = clients
+      .filter((c) => c.category === 'cliente')
+      .map((c) => c._id.toString());
+    const historyMap = await loadClientProcedureHistory(req, clientCategoryIds);
 
     res.json({
       success: true,
       data: {
-        responses: responses.map((r) => formatResponseRow(r, clientMap, questionMap)),
+        responses: responses.map((r) => formatResponseRow(r, clientMap, questionMap, historyMap)),
         pagination: {
           page,
           limit,
@@ -440,6 +575,13 @@ async function getFormAnalytics(req, res, next) {
     }).select('name phone category');
     const clientMap = new Map(clients.map((c) => [c._id.toString(), c]));
     const questionMap = new Map(form.questions.map((q) => [q.id, q]));
+    const clientCategoryIds = clients
+      .filter((c) => c.category === 'cliente')
+      .map((c) => c._id.toString());
+    const historyMap = await loadClientProcedureHistory(req, clientCategoryIds);
+    const audience = countAudience(clientIds, clientMap);
+    const priceIndex = await loadProcedurePriceIndex(req);
+    const ticketGroups = buildTicketGroups(clientIds, clientMap, historyMap, priceIndex);
 
     const questionAnalytics = form.questions.map((question) => {
       const base = {
@@ -490,11 +632,17 @@ async function getFormAnalytics(req, res, next) {
         summary: {
           totalResponses: responses.length,
           uniqueClients: clientIds.length,
+          clientCount: audience.clientCount,
+          leadCount: audience.leadCount,
+          lowTicketMax: ticketGroups.lowMax,
+          highTicketMin: ticketGroups.highMin,
+          lowTicketClients: ticketGroups.lowTicketClients,
+          highTicketClients: ticketGroups.highTicketClients,
           npsScore: npsQuestions.length === 1 ? npsQuestions[0].npsScore : null,
           npsAverage: npsQuestions.length === 1 ? npsQuestions[0].average : null,
         },
         questionAnalytics,
-        recentResponses: responses.slice(0, 10).map((r) => formatResponseRow(r, clientMap, questionMap)),
+        recentResponses: responses.slice(0, 10).map((r) => formatResponseRow(r, clientMap, questionMap, historyMap)),
       },
     });
   } catch (error) {
