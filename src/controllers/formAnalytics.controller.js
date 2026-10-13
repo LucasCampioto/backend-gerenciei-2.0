@@ -9,7 +9,15 @@ const { findClientByPhone, stripPhoneDigits } = require('../utils/phoneMatch');
 const { findClientByNormalizedName } = require('../utils/nameMatch');
 const { logActivity } = require('../services/clientActivity.service');
 const { tenantFilter, tenantDocFilter, tenantCreateFields, scopeUserId, andFilters } = require('../utils/tenantScope');
-const { percentileSorted } = require('../utils/winningMonthsFacts');
+
+function percentileSorted(sortedAsc, percentile) {
+  if (!sortedAsc.length) return 0;
+  const index = Math.min(
+    sortedAsc.length - 1,
+    Math.max(0, Math.floor((percentile / 100) * (sortedAsc.length - 1)))
+  );
+  return sortedAsc[index];
+}
 
 function parseDateRange(startDate, endDate) {
   const filter = {};
