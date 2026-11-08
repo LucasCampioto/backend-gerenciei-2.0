@@ -26,10 +26,11 @@ function formatClient(client) {
     convertedAt: obj.convertedAt
       ? (obj.convertedAt instanceof Date ? obj.convertedAt.toISOString() : obj.convertedAt)
       : null,
-    clientGroup: obj.clientGroup ?? 'grupo_a',
+    clientGroup: obj.clientGroup ?? 'lead_frio',
     noReturnReason: obj.noReturnReason ?? '',
     leadSource: obj.leadSource ?? null,
     leadSourceOther: obj.leadSourceOther ?? '',
+    sourceFormId: obj.sourceFormId ? obj.sourceFormId.toString() : null,
     photoConsentAt: obj.photoConsentAt
       ? (obj.photoConsentAt instanceof Date ? obj.photoConsentAt.toISOString() : obj.photoConsentAt)
       : undefined,
@@ -97,7 +98,7 @@ async function createClient(req, res, next) {
       phone: phoneDigits,
       category: category || 'lead',
       isNewClient: isNewClient !== undefined ? isNewClient : true,
-      clientGroup: clientGroup || 'grupo_a',
+      clientGroup: clientGroup || 'lead_frio',
       noReturnReason: noReturnReason || '',
       leadSource: leadSource || null,
       leadSourceOther: leadSource === 'outros' ? (leadSourceOther || '').trim() : '',

@@ -3,7 +3,9 @@ const Joi = require('joi');
 const updateCrmClientSchema = Joi.object({
   name: Joi.string().trim().min(1).optional(),
   category: Joi.string().valid('lead', 'cliente').optional(),
-  clientGroup: Joi.string().valid('grupo_a', 'grupo_b', 'grupo_c', 'grupo_d').optional(),
+  clientGroup: Joi.string()
+    .valid('lead_quente', 'lead_morno', 'lead_frio', 'cliente_ativa', 'cliente_inativa')
+    .optional(),
   noReturnReason: Joi.string().allow('').optional(),
   improvementReason: Joi.string().allow('').optional(),
   leadSource: Joi.string().valid('redes_sociais', 'google', 'indicacao', 'outros').allow(null).optional(),

@@ -84,7 +84,7 @@ async function bootstrapOnboarding(req, res, next) {
       phone: '11999990000',
       category: 'cliente',
       isNewClient: false,
-      clientGroup: 'grupo_a',
+      clientGroup: 'lead_frio',
       leadSource: 'outros',
       leadSourceOther: 'onboarding',
     });

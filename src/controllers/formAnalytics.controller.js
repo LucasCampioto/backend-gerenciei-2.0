@@ -472,7 +472,7 @@ async function convertResponseToClient(req, res, next) {
         category: 'cliente',
         isNewClient: true,
         convertedAt: new Date(),
-        clientGroup: 'grupo_a',
+        clientGroup: 'lead_frio',
         leadSource: nextLeadSource ?? 'outros',
         leadSourceOther:
           nextLeadSource === 'outros'

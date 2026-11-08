@@ -7,14 +7,19 @@ const {
   logActivity,
   formatActivity,
   getGroupDirection,
-  GROUP_ORDER,
 } = require('../services/clientActivity.service');
 const { buildActionQueue, getDueReturns } = require('../services/actionQueue.service');
 const { formatJourneyPlan, syncClientPipelineWithJourney } = require('../services/journeyPlan.service');
 const { syncLeadsWithSales } = require('../services/leadConversion.service');
+const {
+  CLIENT_GROUPS,
+  DEFAULT_CLIENT_GROUP,
+} = require('../constants/clientGroup.constants');
 const Document = require('../models/Document');
 const FormResponse = require('../models/FormResponse');
 const Form = require('../models/Form');
+
+const CLIENT_GROUP_SET = new Set(CLIENT_GROUPS);
 
 function parseDateRange(startDate, endDate) {
   const range = {};
@@ -84,7 +89,7 @@ function formatCrmClient(client, lastSaleMap) {
     name: client.name,
     phone: client.phone,
     category: client.category,
-    clientGroup: client.clientGroup ?? 'grupo_a',
+    clientGroup: client.clientGroup ?? DEFAULT_CLIENT_GROUP,
     noReturnReason: client.noReturnReason ?? '',
     improvementReason: client.improvementReason ?? '',
     leadSource: client.leadSource ?? null,
@@ -165,7 +170,7 @@ async function getCrmClients(req, res, next) {
 
     const query = { userId: userObjectId };
 
-    if (clientGroup && GROUP_ORDER[clientGroup]) {
+    if (clientGroup && CLIENT_GROUP_SET.has(clientGroup)) {
       query.clientGroup = clientGroup;
     }
 
@@ -281,15 +286,10 @@ async function getCrmDashboard(req, res, next) {
         .lean(),
     ]);
 
-    const byGroup = {
-      grupo_a: 0,
-      grupo_b: 0,
-      grupo_c: 0,
-      grupo_d: 0,
-    };
+    const byGroup = Object.fromEntries(CLIENT_GROUPS.map((id) => [id, 0]));
 
     clients.forEach((client) => {
-      const group = client.clientGroup ?? 'grupo_a';
+      const group = client.clientGroup ?? DEFAULT_CLIENT_GROUP;
       if (byGroup[group] !== undefined) byGroup[group] += 1;
     });
 

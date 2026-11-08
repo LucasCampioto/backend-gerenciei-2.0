@@ -38,11 +38,31 @@ const clientActivitySchema = new mongoose.Schema({
   },
   fromGroup: {
     type: String,
-    enum: ['grupo_a', 'grupo_b', 'grupo_c', 'grupo_d'],
+    enum: [
+      'grupo_a',
+      'grupo_b',
+      'grupo_c',
+      'grupo_d',
+      'lead_quente',
+      'lead_morno',
+      'lead_frio',
+      'cliente_ativa',
+      'cliente_inativa',
+    ],
   },
   toGroup: {
     type: String,
-    enum: ['grupo_a', 'grupo_b', 'grupo_c', 'grupo_d'],
+    enum: [
+      'grupo_a',
+      'grupo_b',
+      'grupo_c',
+      'grupo_d',
+      'lead_quente',
+      'lead_morno',
+      'lead_frio',
+      'cliente_ativa',
+      'cliente_inativa',
+    ],
   },
   content: {
     type: String,

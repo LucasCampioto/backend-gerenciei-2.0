@@ -405,10 +405,10 @@ async function buildActionQueue(userId) {
       });
     }
 
-    // Grupo D é um dado manual e pode ficar defasado. Uma venda/visita nos
+    // Cliente inativa pode estar defasada. Uma venda/visita nos
     // últimos 90 dias prova atividade recente e não deve gerar reativação.
     if (
-      client.clientGroup === 'grupo_d'
+      client.clientGroup === 'cliente_inativa'
       && (lastVisitDays === null || lastVisitDays >= RECENT_CLIENT_DAYS)
     ) {
       items.push({
@@ -416,12 +416,12 @@ async function buildActionQueue(userId) {
         clientName: client.name,
         phone: client.phone,
         reason: lastSale
-          ? `Cliente inativo · última visita há ${lastVisitDays} dias`
-          : 'Cliente nunca apareceu (inativo)',
+          ? `Cliente inativa · última visita há ${lastVisitDays} dias`
+          : 'Cliente nunca apareceu (inativa)',
         priority: 80,
         suggestedAction: 'Reativar ou registrar motivo',
         href: hrefForClient(clientId),
-        type: 'group_d',
+        type: 'cliente_inativa',
         ...context,
       });
     }

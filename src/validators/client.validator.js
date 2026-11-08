@@ -11,7 +11,9 @@ const clientSchema = Joi.object({
   }),
   category: Joi.string().valid('lead', 'cliente').default('lead'),
   isNewClient: Joi.boolean().default(true),
-  clientGroup: Joi.string().valid('grupo_a', 'grupo_b', 'grupo_c', 'grupo_d').default('grupo_a'),
+  clientGroup: Joi.string()
+    .valid('lead_quente', 'lead_morno', 'lead_frio', 'cliente_ativa', 'cliente_inativa')
+    .default('lead_frio'),
   noReturnReason: Joi.string().allow('').optional(),
   leadSource: Joi.string()
     .valid('redes_sociais', 'google', 'indicacao', 'outros')

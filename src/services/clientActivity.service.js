@@ -1,5 +1,6 @@
 const ClientActivity = require('../models/ClientActivity');
 
+/** Ordem legada A–D. Categorias novas não entram em upgrade/downgrade. */
 const GROUP_ORDER = {
   grupo_a: 1,
   grupo_b: 2,
@@ -9,8 +10,9 @@ const GROUP_ORDER = {
 
 function getGroupDirection(fromGroup, toGroup) {
   if (!fromGroup || !toGroup || fromGroup === toGroup) return 'unchanged';
-  const from = GROUP_ORDER[fromGroup] ?? 0;
-  const to = GROUP_ORDER[toGroup] ?? 0;
+  const from = GROUP_ORDER[fromGroup];
+  const to = GROUP_ORDER[toGroup];
+  if (from == null || to == null) return 'unchanged';
   if (to < from) return 'upgrade';
   if (to > from) return 'downgrade';
   return 'unchanged';

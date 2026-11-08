@@ -398,7 +398,7 @@ async function getLeadConversionFunnel(req, res, next) {
           phone: client.phone,
           category: client.category,
           isNewClient: client.isNewClient ?? client.isNew ?? true,
-          clientGroup: client.clientGroup ?? 'grupo_a',
+          clientGroup: client.clientGroup ?? 'lead_frio',
           createdAt: client.createdAt,
           convertedAt: client.convertedAt ?? null,
           comVenda: Boolean(saleInfo),

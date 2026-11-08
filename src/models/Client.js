@@ -37,8 +37,14 @@ const clientSchema = new mongoose.Schema({
   },
   clientGroup: {
     type: String,
-    enum: ['grupo_a', 'grupo_b', 'grupo_c', 'grupo_d'],
-    default: 'grupo_a'
+    enum: [
+      'lead_quente',
+      'lead_morno',
+      'lead_frio',
+      'cliente_ativa',
+      'cliente_inativa',
+    ],
+    default: 'lead_frio',
   },
   noReturnReason: {
     type: String,

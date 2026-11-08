@@ -19,6 +19,7 @@ async function promoteLeadToClient(userId, client, { reason = 'venda', save = tr
   }
 
   client.category = 'cliente';
+  client.clientGroup = 'cliente_ativa';
   client.convertedAt = new Date();
   client.pipelineStage = 'won';
   if (save) await client.save();

@@ -35,3 +35,6 @@ credentials/
 uploads/
 .vercel
 .env*.local
+
+# Backups de migração (contêm PII)
+backups/

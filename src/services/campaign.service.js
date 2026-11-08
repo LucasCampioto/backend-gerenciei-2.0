@@ -2606,7 +2606,7 @@ async function submitPublicCampaignLead(slug, {
       phone: phoneDigits,
       category: 'lead',
       isNewClient: true,
-      clientGroup: 'grupo_a',
+      clientGroup: 'lead_frio',
       leadSource: 'outros',
       leadSourceOther: `Campanha: ${campaign.title}`.slice(0, 120),
       pipelineStage: 'new',

@@ -178,7 +178,7 @@ async function submitPublicResponse(req, res, next) {
         phone: normalizedPhone,
         category: 'lead',
         isNewClient: true,
-        clientGroup: 'grupo_a',
+        clientGroup: 'lead_frio',
         leadSource: 'outros',
         leadSourceOther: `Formulário: ${formTitle}`.slice(0, 120),
         sourceFormId: form._id,
