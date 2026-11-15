@@ -47,6 +47,12 @@ const {
   createUploadToken,
   resolveLeadImageUrls,
 } = require('./campaignDiagnosisSimulation');
+const {
+  normalizeGameVariant,
+  sanitizeGameContent,
+  resolveGameDraw,
+  assertGamePlayable,
+} = require('./campaignGame');
 
 function generatePublicSlug() {
   return crypto.randomBytes(9).toString('base64url').slice(0, 12);
@@ -1273,6 +1279,7 @@ function formatCampaign(doc) {
     status: obj.status,
     leadMagnetType,
     diagnosisVariant: normalizeDiagnosisVariant(obj.diagnosisVariant),
+    gameVariant: normalizeGameVariant(obj.gameVariant),
     contactWhatsApp: obj.contactWhatsApp || '',
     couponId: obj.couponId ? String(obj.couponId) : null,
     couponCode: obj.couponCode || '',
@@ -1948,6 +1955,10 @@ async function createCampaign(userId, payload = {}) {
     leadMagnetType === 'diagnosis'
       ? normalizeDiagnosisVariant(payload.diagnosisVariant)
       : 'laudo';
+  const gameVariant =
+    leadMagnetType === 'game'
+      ? normalizeGameVariant(payload.gameVariant)
+      : 'roulette';
   let slug = generatePublicSlug();
   // rare collision retry
   for (let i = 0; i < 3; i += 1) {
@@ -1961,6 +1972,12 @@ async function createCampaign(userId, payload = {}) {
   let source = null;
   if (leadMagnetType === 'ebook') {
     content = heuristicCampaignContent(topic);
+    source = 'heuristic';
+  } else if (leadMagnetType === 'game') {
+    content = heuristicMagnetContent(leadMagnetType, topic, [], { gameVariant });
+    if (payload.content?.game) {
+      content.game = sanitizeGameContent(payload.content.game, topic, gameVariant);
+    }
     source = 'heuristic';
   } else if (leadMagnetType !== 'quiz') {
     content = heuristicMagnetContent(leadMagnetType, topic);
@@ -1994,6 +2011,7 @@ async function createCampaign(userId, payload = {}) {
     status: 'draft',
     leadMagnetType,
     diagnosisVariant,
+    gameVariant,
     contactWhatsApp: payload.contactWhatsApp || owner?.phone || '',
     couponId: couponFields.couponId,
     couponCode: couponFields.couponCode,
@@ -2072,6 +2090,12 @@ function buildQualityReport(content, leadMagnetType) {
     if (report.slotCount < 3) warnings.push(`Poucas vagas na fila: ${report.slotCount}`);
   }
 
+  if (leadMagnetType === 'game') {
+    report.prizeCount = (content?.game?.prizes || []).length;
+    report.jackpotEnabled = Boolean(content?.game?.jackpot?.enabled);
+    if (report.prizeCount < 2) warnings.push(`Jogo com poucos prêmios: ${report.prizeCount}`);
+  }
+
   const landing = content?.landing || {};
   const missingNarrative = ['statusQuoScenes', 'tensionBody', 'insightBody', 'transformationBody', 'howItWorks']
     .filter((k) => !landing[k] || (Array.isArray(landing[k]) && !landing[k].length));
@@ -2127,6 +2151,7 @@ async function generateCampaignContent(userId, id) {
 
   const leadMagnetType = normalizeLeadMagnetType(campaign.leadMagnetType);
   const isLegacyStrict = leadMagnetType === 'ebook' || leadMagnetType === 'quiz';
+  const gameVariant = normalizeGameVariant(campaign.gameVariant);
 
   if (isLegacyStrict) {
     await ensureAgnoAvailable();
@@ -2161,51 +2186,72 @@ async function generateCampaignContent(userId, id) {
 
   let content = null;
   let source = 'heuristic';
-  try {
-    let call;
-    if (leadMagnetType === 'quiz') call = generateQuizCampaign;
-    else if (leadMagnetType === 'ebook') call = generateCampaign;
-    else if (leadMagnetType === 'diagnosis') {
-      call = (payload) =>
-        generateQuizCampaign({
-          ...payload,
-          campaignBrief: {
-            ...(payload.campaignBrief || {}),
-            leadMagnetType: 'diagnosis',
-            diagnosisMode: true,
-          },
-        });
-    } else {
-      call = generateMagnetCampaign;
-    }
 
-    const res = await call({
-      userId: String(userId),
-      campaignBrief: brief,
-      context: { clinicName, procedures: focusProcedures },
+  // Jogos: sem Agno — seed/heurística + conteúdo já editado no wizard
+  if (leadMagnetType === 'game') {
+    const seeded = heuristicMagnetContent(leadMagnetType, brief.topic, focusProcedures, {
+      gameVariant,
     });
-    content = normalizeMagnetContentFromAgno(res?.data || null, leadMagnetType);
-    source = res?.source || 'agno';
-    if (res?.success === false && contentIsComplete(leadMagnetType, content)) {
-      source = 'agno';
-    }
-  } catch (err) {
-    console.warn('[campaign] agno failed:', err.message);
-    if (isLegacyStrict) {
-      const e = new Error(
-        'A IA não conseguiu gerar a campanha agora. Tente novamente em instantes.'
-      );
-      e.statusCode = 502;
-      throw e;
-    }
-    content = heuristicMagnetContent(leadMagnetType, brief.topic, focusProcedures);
+    const existingGame = campaign.content?.game;
+    content = {
+      ...seeded,
+      ...(campaign.content || {}),
+      game: sanitizeGameContent(existingGame || seeded.game, brief.topic, gameVariant),
+      landing: campaign.content?.landing?.heroHeadline
+        ? campaign.content.landing
+        : seeded.landing,
+      adCreatives: campaign.content?.adCreatives?.length
+        ? campaign.content.adCreatives
+        : seeded.adCreatives,
+    };
     source = 'heuristic';
-  }
+  } else {
+    try {
+      let call;
+      if (leadMagnetType === 'quiz') call = generateQuizCampaign;
+      else if (leadMagnetType === 'ebook') call = generateCampaign;
+      else if (leadMagnetType === 'diagnosis') {
+        call = (payload) =>
+          generateQuizCampaign({
+            ...payload,
+            campaignBrief: {
+              ...(payload.campaignBrief || {}),
+              leadMagnetType: 'diagnosis',
+              diagnosisMode: true,
+            },
+          });
+      } else {
+        call = generateMagnetCampaign;
+      }
 
-  if (!contentIsComplete(leadMagnetType, content)) {
-    if (!isLegacyStrict) {
+      const res = await call({
+        userId: String(userId),
+        campaignBrief: brief,
+        context: { clinicName, procedures: focusProcedures },
+      });
+      content = normalizeMagnetContentFromAgno(res?.data || null, leadMagnetType);
+      source = res?.source || 'agno';
+      if (res?.success === false && contentIsComplete(leadMagnetType, content)) {
+        source = 'agno';
+      }
+    } catch (err) {
+      console.warn('[campaign] agno failed:', err.message);
+      if (isLegacyStrict) {
+        const e = new Error(
+          'A IA não conseguiu gerar a campanha agora. Tente novamente em instantes.'
+        );
+        e.statusCode = 502;
+        throw e;
+      }
       content = heuristicMagnetContent(leadMagnetType, brief.topic, focusProcedures);
       source = 'heuristic';
+    }
+
+    if (!contentIsComplete(leadMagnetType, content)) {
+      if (!isLegacyStrict) {
+        content = heuristicMagnetContent(leadMagnetType, brief.topic, focusProcedures);
+        source = 'heuristic';
+      }
     }
   }
 
@@ -2277,12 +2323,18 @@ async function generateCampaignContent(userId, id) {
   if (leadMagnetType === 'evaluation') {
     content = sanitizeEvaluationContent(content, brief.topic);
   }
+  if (leadMagnetType === 'game') {
+    content.game = sanitizeGameContent(content.game, brief.topic, gameVariant);
+  }
 
   content.adCreatives = normalizeAdCreatives(content.adCreatives, brief.topic);
 
   campaign.content = content;
   campaign.source = source;
   campaign.leadMagnetType = leadMagnetType;
+  if (leadMagnetType === 'game') {
+    campaign.gameVariant = gameVariant;
+  }
   campaign.qualityReport = {
     ...buildQualityReport(content, leadMagnetType),
     promptVersion: content.promptVersion || null,
@@ -2293,7 +2345,8 @@ async function generateCampaignContent(userId, id) {
     content.ebook?.title ||
     resolveTutorialContent(content)?.title ||
     content.calculator?.title ||
-    content.evaluation?.title;
+    content.evaluation?.title ||
+    content.game?.title;
   if (generatedTitle) {
     campaign.title = generatedTitle;
   }
@@ -2340,6 +2393,18 @@ async function updateCampaign(userId, id, payload = {}) {
   }
   if (payload.diagnosisVariant !== undefined) {
     campaign.diagnosisVariant = normalizeDiagnosisVariant(payload.diagnosisVariant);
+  }
+  if (payload.gameVariant !== undefined) {
+    campaign.gameVariant = normalizeGameVariant(payload.gameVariant);
+  }
+  if (payload.content?.game && normalizeLeadMagnetType(campaign.leadMagnetType) === 'game') {
+    const next = { ...(payload.content || campaign.content || {}) };
+    next.game = sanitizeGameContent(
+      payload.content.game,
+      campaign.topic || campaign.title,
+      campaign.gameVariant
+    );
+    campaign.content = next;
   }
   if (payload.couponId !== undefined) {
     if (normalizeDiagnosisVariant(campaign.diagnosisVariant) === 'simulation' || !payload.couponId) {
@@ -2388,7 +2453,14 @@ async function publishCampaign(userId, id) {
     err.statusCode = 400;
     throw err;
   }
-  if (!isFunnelMagnet(leadMagnetType)) {
+  if (leadMagnetType === 'game') {
+    try {
+      assertGamePlayable(campaign.content?.game, campaign.gameVariant);
+    } catch (err) {
+      throw err;
+    }
+  }
+  if (!isFunnelMagnet(leadMagnetType) && leadMagnetType !== 'game') {
     const landing = campaign.content?.landing;
     if (!landing?.heroHeadline && !landing?.headline) {
       const err = new Error('Gere o conteúdo da campanha antes de publicar');
@@ -2435,6 +2507,15 @@ async function getPublicCampaign(slug) {
   let calculator = campaign.content?.calculator || null;
   const evaluation = campaign.content?.evaluation || null;
   const leadMagnetType = normalizeLeadMagnetType(campaign.leadMagnetType);
+  const gameVariant = normalizeGameVariant(campaign.gameVariant);
+  const game =
+    leadMagnetType === 'game'
+      ? sanitizeGameContent(
+          campaign.content?.game,
+          campaign.topic || campaign.title,
+          gameVariant
+        )
+      : null;
   const contactWhatsApp = campaign.contactWhatsApp || user?.phone || '';
   const diagnosisVariant = normalizeDiagnosisVariant(campaign.diagnosisVariant);
 
@@ -2484,6 +2565,7 @@ async function getPublicCampaign(slug) {
     clinicName,
     leadMagnetType,
     diagnosisVariant,
+    gameVariant: leadMagnetType === 'game' ? gameVariant : undefined,
     contactWhatsApp,
     couponCode: showCoupon ? String(publicCouponCode).trim() : undefined,
     couponPercent: showCoupon ? normalizeCouponPercent(publicCouponPercent) : undefined,
@@ -2516,6 +2598,7 @@ async function getPublicCampaign(slug) {
     checklist: undefined,
     calculator: leadMagnetType === 'calculator' ? calculator : undefined,
     evaluation: leadMagnetType === 'evaluation' ? evaluation : undefined,
+    game: leadMagnetType === 'game' ? game : undefined,
   };
 }
 
@@ -2547,9 +2630,11 @@ async function resolveCampaignPdfUrl(campaign) {
 }
 
 function duplicateCampaignLeadError(campaign, pdfUrl = null) {
-  const err = new Error('Este WhatsApp já está cadastrado nesta campanha.');
+  const err = new Error(
+    'Este WhatsApp já participou desta campanha. Cada número joga uma vez.'
+  );
   err.statusCode = 409;
-  err.data = { alreadyRegistered: true, pdfUrl };
+  err.data = { alreadyRegistered: true, pdfUrl, alreadyPlayed: true };
   return err;
 }
 
@@ -2642,8 +2727,24 @@ async function submitPublicCampaignLead(slug, {
     ? profiles.find((p) => p.id === quizProfileId) || null
     : null;
 
-  const payload = magnetPayload && typeof magnetPayload === 'object' ? magnetPayload : null;
+  let payload = magnetPayload && typeof magnetPayload === 'object' ? { ...magnetPayload } : null;
   const leadMagnetType = normalizeLeadMagnetType(campaign.leadMagnetType);
+
+  let gamePrize = null;
+  let boxReveal = undefined;
+  if (leadMagnetType === 'game') {
+    try {
+      const drawn = resolveGameDraw(campaign, payload || {});
+      gamePrize = drawn.prize;
+      boxReveal = drawn.boxReveal;
+      payload = { ...(payload || {}), ...drawn.magnetPayload };
+    } catch (err) {
+      if (err.statusCode) throw err;
+      const e = new Error(err.message || 'Não foi possível sortear o prêmio.');
+      e.statusCode = 400;
+      throw e;
+    }
+  }
 
   // Diagnóstico: personaliza laudo com IA a partir das respostas reais
   let resolvedProfile = profile
@@ -2770,6 +2871,22 @@ async function submitPublicCampaignLead(slug, {
     await client.save();
   }
 
+  // Jogo: anota prêmio sorteado
+  if (leadMagnetType === 'game' && gamePrize) {
+    const prev = client.qualification && typeof client.qualification === 'object'
+      ? client.qualification
+      : {};
+    client.qualification = {
+      ...prev,
+      summary: `Jogo (${normalizeGameVariant(campaign.gameVariant)}): ${gamePrize.label}`.slice(0, 500),
+      nextStep: 'Resgatar prêmio do evento / confirmar no WhatsApp',
+      gamePrizeId: gamePrize.id,
+      gamePrizeLabel: gamePrize.label,
+      gameIsJackpot: Boolean(gamePrize.isJackpot),
+    };
+    await client.save();
+  }
+
   let campaignLeadId = null;
   let publicUploadToken = null;
   try {
@@ -2829,6 +2946,11 @@ async function submitPublicCampaignLead(slug, {
   if (payload?.slotId) {
     activityContent += `\n\nVaga preferida: ${payload.slotLabel || payload.slotId}`;
   }
+  if (gamePrize) {
+    activityContent += `\n\nPrêmio do jogo: ${gamePrize.label}${
+      gamePrize.isJackpot ? ' (jackpot)' : ''
+    }`;
+  }
 
   await logActivity({
     userId: campaign.userId,
@@ -2871,10 +2993,14 @@ async function submitPublicCampaignLead(slug, {
     uploadToken: publicUploadToken || undefined,
     profile: resolvedProfile,
     magnetPayload: payload,
+    prize: gamePrize || undefined,
+    boxReveal: boxReveal || undefined,
     successNote:
       leadMagnetType === 'evaluation'
         ? (campaign.content?.evaluation?.successNote || null)
-        : null,
+        : leadMagnetType === 'game'
+          ? 'Prêmio reservado! Mostre esta tela na recepção ou fale no WhatsApp.'
+          : null,
   };
 }
 

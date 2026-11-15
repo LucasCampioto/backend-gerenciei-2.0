@@ -56,6 +56,27 @@ test('Campaign aceita leadMagnetType diy', () => {
   assert.equal(doc.validateSync(), undefined);
 });
 
+test('Campaign aceita leadMagnetType game + gameVariant', () => {
+  const doc = new Campaign({
+    userId: new mongoose.Types.ObjectId(),
+    title: 'Campanha jogo',
+    publicSlug: 'slug-game',
+    leadMagnetType: 'game',
+    gameVariant: 'boxes',
+    content: {
+      game: {
+        title: 'Roleta',
+        prizes: [{ id: 'a', label: '10%', weight: 1 }],
+        jackpot: { enabled: true, label: 'VIP', chancePercent: 5 },
+      },
+    },
+  });
+  assert.equal(doc.validateSync(), undefined);
+  assert.equal(doc.leadMagnetType, 'game');
+  assert.equal(doc.gameVariant, 'boxes');
+  assert.equal(doc.content.game.jackpot.label, 'VIP');
+});
+
 test('Campaign rejeita leadMagnetType inválido', () => {
   const doc = new Campaign({
     userId: new mongoose.Types.ObjectId(),

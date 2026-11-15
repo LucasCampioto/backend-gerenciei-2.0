@@ -3,6 +3,12 @@
  * ebook e quiz continuam nos fluxos Agno dedicados; estes cobrem as iscas novas.
  */
 
+const {
+  heuristicGameContent,
+  gameContentIsComplete,
+  normalizeGameVariant,
+} = require('./campaignGame');
+
 const LEAD_MAGNET_TYPES = [
   'ebook',
   'quiz',
@@ -11,15 +17,17 @@ const LEAD_MAGNET_TYPES = [
   'diagnosis',
   'calculator',
   'evaluation',
+  'game',
 ];
 
 const FUNNEL_TYPES = new Set(['quiz', 'diagnosis']);
-const LANDING_TYPES = new Set(['ebook', 'checklist', 'diy', 'calculator', 'evaluation']);
+const LANDING_TYPES = new Set(['ebook', 'checklist', 'diy', 'calculator', 'evaluation', 'game']);
 const PDF_TYPES = new Set(['ebook', 'checklist', 'diy']);
 
 function normalizeLeadMagnetType(value) {
   const t = String(value || 'ebook').toLowerCase().trim();
   if (t === 'checklist') return 'diy';
+  if (t === 'games' || t === 'jogos') return 'game';
   return LEAD_MAGNET_TYPES.includes(t) ? t : 'ebook';
 }
 
@@ -643,7 +651,7 @@ function heuristicEvaluationContent(topic) {
   };
 }
 
-function heuristicMagnetContent(leadMagnetType, topic, procedures = []) {
+function heuristicMagnetContent(leadMagnetType, topic, procedures = [], options = {}) {
   switch (normalizeLeadMagnetType(leadMagnetType)) {
     case 'diy':
       return heuristicTutorialContent(topic);
@@ -653,6 +661,8 @@ function heuristicMagnetContent(leadMagnetType, topic, procedures = []) {
       return heuristicCalculatorContent(topic, procedures);
     case 'evaluation':
       return heuristicEvaluationContent(topic);
+    case 'game':
+      return heuristicGameContent(topic, normalizeGameVariant(options.gameVariant));
     default:
       return null;
   }
@@ -726,6 +736,7 @@ function contentIsComplete(leadMagnetType, content) {
     return Boolean(content.calculator?.inputs?.length && content.calculator?.packages?.length);
   }
   if (t === 'evaluation') return Boolean(content.evaluation?.slots?.length);
+  if (t === 'game') return gameContentIsComplete(content);
   return Boolean(content.landing?.heroHeadline || content.landing?.headline);
 }
 
@@ -760,4 +771,6 @@ module.exports = {
   heuristicDiagnosisContent,
   heuristicCalculatorContent,
   heuristicEvaluationContent,
+  heuristicGameContent,
+  normalizeGameVariant,
 };

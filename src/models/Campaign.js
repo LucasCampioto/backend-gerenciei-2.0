@@ -23,6 +23,7 @@ const { organizationScopePlugin } = require('./plugins/organizationScope');
  * - checklist: legado — migrado on-read para tutorial
  * - calculator: { title, subtitle, intro, inputs[], packages[], disclaimer }
  * - evaluation: { title, subtitle, weekLabel, intro, slots[], formTitle, ctaText, successNote }
+ * - game: { title, headline, playCta, prizes[{id,label,weight,color}], jackpot{enabled,id,label,chancePercent}, boxesCount }
  * - adCreatives[{headline, primaryText, cta, format: post|story, visualSuggestion}]
  * - audienceSuggestion
  */
@@ -69,7 +70,7 @@ const campaignSchema = new mongoose.Schema(
     /** Tipo da isca digital da campanha. */
     leadMagnetType: {
       type: String,
-      enum: ['ebook', 'quiz', 'checklist', 'diy', 'diagnosis', 'calculator', 'evaluation'],
+      enum: ['ebook', 'quiz', 'checklist', 'diy', 'diagnosis', 'calculator', 'evaluation', 'game'],
       default: 'ebook',
     },
     /** WhatsApp da clínica para CTAs públicos (falar no WhatsApp). */
@@ -86,6 +87,15 @@ const campaignSchema = new mongoose.Schema(
       type: String,
       enum: ['laudo', 'simulation'],
       default: 'laudo',
+    },
+    /**
+     * Variante do jogo de captura (eventos): roleta ou escolha a caixa.
+     * Só relevante quando leadMagnetType === 'game'.
+     */
+    gameVariant: {
+      type: String,
+      enum: ['roulette', 'boxes'],
+      default: 'roulette',
     },
     couponId: {
       type: mongoose.Schema.Types.ObjectId,
