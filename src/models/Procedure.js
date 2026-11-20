@@ -15,8 +15,8 @@ const procedureSchema = new mongoose.Schema({
   },
   description: {
     type: String,
-    required: true,
-    trim: true
+    trim: true,
+    default: '',
   },
   value: {
     type: Number,
@@ -28,10 +28,10 @@ const procedureSchema = new mongoose.Schema({
     min: 1,
     default: null,
   },
-  /** estetica | cursos | estetica_avancada — só estética avançada entra na simulação. */
+  /** estetica | cursos | estetica_avancada | produto — só estética avançada entra na simulação. */
   category: {
     type: String,
-    enum: ['estetica', 'cursos', 'estetica_avancada'],
+    enum: ['estetica', 'cursos', 'estetica_avancada', 'produto'],
     trim: true,
     default: undefined,
   },

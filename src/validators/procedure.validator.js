@@ -5,9 +5,7 @@ const procedureSchema = Joi.object({
     'string.min': 'Nome deve ter no mínimo 3 caracteres',
     'any.required': 'Nome é obrigatório'
   }),
-  description: Joi.string().required().messages({
-    'any.required': 'Descrição é obrigatória'
-  }),
+  description: Joi.string().allow('', null).optional(),
   value: Joi.number().min(0).required().messages({
     'number.min': 'Valor deve ser positivo',
     'any.required': 'Valor é obrigatório'
@@ -16,10 +14,10 @@ const procedureSchema = Joi.object({
     'number.min': 'Retorno em dias deve ser no mínimo 1'
   }),
   category: Joi.string()
-    .valid('estetica', 'cursos', 'estetica_avancada')
+    .valid('estetica', 'cursos', 'estetica_avancada', 'produto')
     .required()
     .messages({
-      'any.only': 'Categoria inválida. Use: estética, cursos ou estética avançada',
+      'any.only': 'Categoria inválida. Use: estética, cursos, estética avançada ou produto',
       'any.required': 'Categoria é obrigatória'
     }),
   compatibleWith: Joi.array().items(Joi.string()).optional()

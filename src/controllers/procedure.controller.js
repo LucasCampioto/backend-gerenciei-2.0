@@ -8,7 +8,7 @@ function formatProcedure(procedure) {
   return {
     id: obj._id,
     name: obj.name,
-    description: obj.description,
+    description: obj.description || '',
     value: obj.value,
     returnAfterDays: obj.returnAfterDays ?? null,
     category: obj.category || null,
@@ -21,7 +21,7 @@ async function getAllProcedures(req, res, next) {
   try {
     const query = { ...tenantFilter(req) };
     const category = typeof req.query.category === 'string' ? req.query.category.trim() : '';
-    if (category === 'estetica' || category === 'cursos' || category === 'estetica_avancada') {
+    if (category === 'estetica' || category === 'cursos' || category === 'estetica_avancada' || category === 'produto') {
       query.category = category;
     }
 
@@ -44,7 +44,7 @@ async function createProcedure(req, res, next) {
     const procedure = new Procedure({
       ...tenantCreateFields(req),
       name,
-      description,
+      description: description || '',
       value,
       category,
       compatibleWith: Array.isArray(compatibleWith) ? compatibleWith : [],
@@ -77,7 +77,7 @@ async function updateProcedure(req, res, next) {
       });
     }
     
-    const update = { name, description, value, category };
+    const update = { name, description: description || '', value, category };
     if (returnAfterDays !== undefined) {
       update.returnAfterDays = returnAfterDays === '' ? null : returnAfterDays;
     }
